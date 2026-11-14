@@ -70,6 +70,9 @@ export class Hud {
     for (const node of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
       node.textContent = i18n.t(node.dataset.i18n as MessageKey);
     }
+    // Touch screens have no keyboard, so they get their own instructions.
+    const touch = window.matchMedia('(pointer: coarse)').matches;
+    element('hint').textContent = touch ? i18n.t('hud.hintTouch') : i18n.t('hud.hintKeyboard');
     element('language').textContent = i18n.t('hud.language', { language: info?.name ?? i18n.locale });
     const status = element('save-status');
     status.textContent = i18n.t(this.canSave ? 'hud.autosave' : 'hud.autosaveOff');

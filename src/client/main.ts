@@ -45,11 +45,11 @@ function persist(): void {
 }
 
 const scene = new DungeonScene(world, {
-  onStep: (w) => hud.setSteps(w.player.tilesWalked),
+  onStep: (w) => hud.setSteps(Math.floor(w.player.distance)),
   onArrive: persist,
 });
 
-hud.setSteps(world.player.tilesWalked);
+hud.setSteps(Math.floor(world.player.distance));
 if (loaded.status === 'damaged') hud.toast('toast.saveDamaged');
 persist();
 window.addEventListener('pagehide', persist);

@@ -1,6 +1,7 @@
 {
   "game.title": "Isometry RPG",
-  "hud.hint": "Tap or click the floor to move.",
+  "hud.hintKeyboard": "Move with WASD or the arrow keys, or click where you want to go.",
+  "hud.hintTouch": "Tap where you want to go, or hold to keep walking.",
   "hud.steps": "{count, plural, =0 {No steps taken yet} one {# step taken} other {# steps taken}}",
   "hud.newDungeon": "New dungeon",
   "hud.language": "Language: {language}",

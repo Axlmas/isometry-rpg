@@ -21,8 +21,9 @@ const brokenStore: KeyValueStore = {
 describe('save', () => {
   it('restores the dungeon, position and step count', () => {
     const world = createWorld(31337);
-    step(world, [{ type: 'moveTo', x: world.spawn.x + 1, y: world.spawn.y + 1 }]);
+    step(world, [{ type: 'moveTo', x: world.spawn.x + 0.6, y: world.spawn.y + 0.85 }]);
     for (let i = 0; i < 50; i++) step(world);
+    expect(Number.isInteger(world.player.pos.x)).toBe(false);
 
     const store = memoryStore();
     expect(saveWorld(store, world)).toBe(true);
@@ -31,7 +32,7 @@ describe('save', () => {
     if (loaded.status !== 'ok') return;
     expect(loaded.world.map).toEqual(world.map);
     expect(loaded.world.player.pos).toEqual(world.player.pos);
-    expect(loaded.world.player.tilesWalked).toBe(world.player.tilesWalked);
+    expect(loaded.world.player.distance).toBe(world.player.distance);
   });
 
   it('reports no save on first launch', () => {
@@ -49,10 +50,22 @@ describe('save', () => {
       JSON.stringify({ ...good, seed: 'abc' }),
       JSON.stringify({ ...good, x: 0, y: 0 }), // inside a wall
       JSON.stringify({ ...good, x: 1e9 }),
-      JSON.stringify({ ...good, tilesWalked: -5 }),
-      JSON.stringify({ ...good, tilesWalked: 1.5 }),
+      JSON.stringify({ ...good, x: 0.7 }), // overlapping a wall
+      JSON.stringify({ ...good, x: null }),
+      JSON.stringify({ ...good, y: '3' }),
+      JSON.stringify({ ...good, distance: -5 }),
+      JSON.stringify({ ...good, distance: 1e999 }),
+      JSON.stringify({ ...good, version: 1 }), // v1 needs tilesWalked
     ];
     for (const raw of cases) expect(parseSave(raw).status, raw).toBe('damaged');
+  });
+
+  it('upgrades a save from the previous version', () => {
+    const world = createWorld(1);
+    const old = JSON.stringify({ version: 1, seed: 1, x: world.spawn.x, y: world.spawn.y, tilesWalked: 12 });
+    const loaded = parseSave(old);
+    expect(loaded.status).toBe('ok');
+    if (loaded.status === 'ok') expect(loaded.world.player.distance).toBe(12);
   });
 
   it('survives storage that throws', () => {

@@ -1,17 +1,26 @@
 import Phaser from 'phaser';
 import { type Command, type Point, type World, TICK_MS, TILE_WALL, isMoving, isWalkable, step, tileAt } from '../sim';
-import { TILE_HEIGHT, TILE_WIDTH, screenToTile, tileToScreen } from './iso';
+import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 
 const WALL_HEIGHT = 30;
 const HALF_W = TILE_WIDTH / 2;
 const HALF_H = TILE_HEIGHT / 2;
-/** A press that travels further than this is a drag, not a tap. */
-const TAP_SLOP_PX = 12;
+/** While the pointer is held down, the destination follows it at this interval. */
+const HOLD_REPEAT_MS = 120;
+
+// Physical key positions (KeyboardEvent.code), so movement works on any
+// keyboard layout, including Cyrillic. Values are directions on the screen.
+const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
+  KeyW: [0, -1], ArrowUp: [0, -1],
+  KeyS: [0, 1], ArrowDown: [0, 1],
+  KeyA: [-1, 0], ArrowLeft: [-1, 0],
+  KeyD: [1, 0], ArrowRight: [1, 0],
+};
 
 export interface SceneEvents {
-  /** The hero entered a new tile. */
+  /** The whole number of steps walked has changed. */
   onStep(world: World): void;
-  /** The hero finished walking. */
+  /** The hero stopped walking. */
   onArrive(world: World): void;
 }
 
@@ -25,12 +34,14 @@ export class DungeonScene extends Phaser.Scene {
   private pending: Command[] = [];
   private accumulator = 0;
   private previous: Point = { x: 0, y: 0 };
-  private lastWalked = 0;
+  private lastSteps = 0;
   private wasMoving = false;
+  private readonly heldKeys = new Set<string>();
+  private holdTimer = 0;
+  private lastFrameAt = performance.now();
   private mapObjects: Phaser.GameObjects.GameObject[] = [];
   private hero!: Phaser.GameObjects.Container;
   private marker!: Phaser.GameObjects.Graphics;
-  private hover!: Phaser.GameObjects.Graphics;
 
   constructor(world: World, events: SceneEvents) {
     super('dungeon');
@@ -40,27 +51,41 @@ export class DungeonScene extends Phaser.Scene {
 
   create(): void {
     this.marker = this.add.graphics().setDepth(-500).setVisible(false);
-    this.drawDiamond(this.marker, 0xe8c36a, 0.55, 0.7);
-    this.hover = this.add.graphics().setDepth(-600).setVisible(false);
-    this.drawDiamond(this.hover, 0xffffff, 0.12, 1);
+    this.marker.lineStyle(2, 0xe8c36a, 0.9).strokeEllipse(0, 0, 26, 13);
+    this.marker.fillStyle(0xe8c36a, 0.35).fillEllipse(0, 0, 26, 13);
     this.hero = this.createHero();
     this.cameras.main.startFollow(this.hero, false, 0.12, 0.12);
 
-    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.getDistance() > TAP_SLOP_PX) return;
-      const tile = screenToTile(pointer.worldX, pointer.worldY);
-      if (!isWalkable(this.world.map, tile.x, tile.y)) return;
-      this.pending.push({ type: 'moveTo', x: tile.x, y: tile.y });
-      const at = tileToScreen(tile.x, tile.y);
-      this.marker.setPosition(at.x, at.y).setVisible(true);
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.holdTimer = 0;
+      this.orderMoveTo(pointer);
     });
-    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      // Hover feedback is for mouse only; a finger has no hover state.
-      if (pointer.wasTouch) return;
-      const tile = screenToTile(pointer.worldX, pointer.worldY);
-      const walkable = isWalkable(this.world.map, tile.x, tile.y);
-      const at = tileToScreen(tile.x, tile.y);
-      this.hover.setPosition(at.x, at.y).setVisible(walkable);
+
+    // Listening on the window keeps movement working even when a HUD button has focus.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.code in KEY_DIRECTIONS) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (document.querySelector('dialog[open]')) return; // Keys belong to the dialog.
+      event.preventDefault(); // Arrow keys must not scroll the page.
+      if (this.heldKeys.has(event.code)) return;
+      this.heldKeys.add(event.code);
+      this.sendKeyDirection();
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (this.heldKeys.delete(event.code)) this.sendKeyDirection();
+    };
+    // If the window loses focus, key releases are never delivered.
+    const onBlur = () => {
+      if (this.heldKeys.size === 0) return;
+      this.heldKeys.clear();
+      this.sendKeyDirection();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     });
 
     this.scale.on('resize', this.fitCamera, this);
@@ -73,18 +98,35 @@ export class DungeonScene extends Phaser.Scene {
     this.world = world;
     this.pending = [];
     this.accumulator = 0;
+    this.lastFrameAt = performance.now();
     this.previous = { ...world.player.pos };
-    this.lastWalked = world.player.tilesWalked;
+    this.lastSteps = Math.floor(world.player.distance);
     this.wasMoving = false;
+    this.heldKeys.clear();
     this.marker.setVisible(false);
-    this.hover.setVisible(false);
     for (const object of this.mapObjects) object.destroy();
     this.mapObjects = this.drawMap();
     this.placeHero(world.player.pos);
     this.cameras.main.centerOn(this.hero.x, this.hero.y);
   }
 
-  override update(_time: number, delta: number): void {
+  override update(): void {
+    // Phaser smooths and clamps its own frame delta, which makes the game run
+    // slow on devices with an uneven frame rate. The real clock does not.
+    const now = performance.now();
+    const delta = now - this.lastFrameAt;
+    this.lastFrameAt = now;
+
+    // Holding the mouse button or a finger keeps the hero walking towards it.
+    const pointer = this.input.activePointer;
+    if (pointer.isDown && this.heldKeys.size === 0) {
+      this.holdTimer += delta;
+      if (this.holdTimer >= HOLD_REPEAT_MS) {
+        this.holdTimer = 0;
+        this.orderMoveTo(pointer);
+      }
+    }
+
     // Rules run in fixed ticks; a long pause (hidden tab) must not turn into
     // a burst of hundreds of ticks.
     this.accumulator = Math.min(this.accumulator + delta, TICK_MS * 5);
@@ -104,10 +146,33 @@ export class DungeonScene extends Phaser.Scene {
     });
   }
 
+  private orderMoveTo(pointer: Phaser.Input.Pointer): void {
+    // The pointer's stored world position goes stale while the camera moves.
+    const at = pointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
+    const target = screenToWorld(at.x, at.y);
+    if (!isWalkable(this.world.map, Math.round(target.x), Math.round(target.y))) return;
+    this.pending.push({ type: 'moveTo', x: target.x, y: target.y });
+    this.marker.setPosition(at.x, at.y).setVisible(true);
+  }
+
+  private sendKeyDirection(): void {
+    let sx = 0;
+    let sy = 0;
+    for (const code of this.heldKeys) {
+      const [dx, dy] = KEY_DIRECTIONS[code] as readonly [number, number];
+      sx += dx;
+      sy += dy;
+    }
+    // "Up" means up on the screen, which is a diagonal on the isometric grid.
+    const dir = screenToWorld(Math.sign(sx) * HALF_W, Math.sign(sy) * HALF_H);
+    this.pending.push({ type: 'moveDir', dx: dir.x, dy: dir.y });
+    if (sx !== 0 || sy !== 0) this.marker.setVisible(false);
+  }
+
   private afterTick(): void {
-    const walked = this.world.player.tilesWalked;
-    if (walked !== this.lastWalked) {
-      this.lastWalked = walked;
+    const steps = Math.floor(this.world.player.distance);
+    if (steps !== this.lastSteps) {
+      this.lastSteps = steps;
       this.events_.onStep(this.world);
     }
     const moving = isMoving(this.world);
@@ -127,10 +192,8 @@ export class DungeonScene extends Phaser.Scene {
   private placeHero(pos: Point): void {
     const at = tileToScreen(pos.x, pos.y);
     this.hero.setPosition(at.x, at.y);
-    // Objects further down the screen are drawn on top. Walls use x + y, so
-    // +0.5 puts the hero in front of the walls behind them and behind the
-    // walls in front of them.
-    this.hero.setDepth(pos.x + pos.y + 0.5);
+    // Objects further down the screen are drawn on top; walls use the same x + y scale.
+    this.hero.setDepth(pos.x + pos.y);
   }
 
   private createHero(): Phaser.GameObjects.Container {
@@ -140,15 +203,6 @@ export class DungeonScene extends Phaser.Scene {
     body.fillStyle(0x2c4f85).fillRoundedRect(-9, -18, 18, 14, { tl: 0, tr: 0, bl: 7, br: 7 });
     body.fillStyle(0xf0d2b0).fillCircle(0, -42, 8);
     return this.add.container(0, 0, [body]);
-  }
-
-  private drawDiamond(g: Phaser.GameObjects.Graphics, color: number, fillAlpha: number, scale: number): void {
-    const w = HALF_W * scale;
-    const h = HALF_H * scale;
-    g.fillStyle(color, fillAlpha);
-    g.fillPoints([{ x: 0, y: -h }, { x: w, y: 0 }, { x: 0, y: h }, { x: -w, y: 0 }], true);
-    g.lineStyle(2, color, Math.min(1, fillAlpha + 0.4));
-    g.strokePoints([{ x: 0, y: -h }, { x: w, y: 0 }, { x: 0, y: h }, { x: -w, y: 0 }], true, true);
   }
 
   private drawMap(): Phaser.GameObjects.GameObject[] {
@@ -163,16 +217,11 @@ export class DungeonScene extends Phaser.Scene {
         if (tileAt(map, x, y) !== TILE_WALL) {
           // Cosmetic variation only; it does not come from the game's RNG.
           const shade = ((x * 7 + y * 13) % 5) * 2;
+          const diamond = [{ x: c.x, y: c.y - HALF_H }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }];
           floor.fillStyle(Phaser.Display.Color.GetColor(52 + shade, 56 + shade, 68 + shade));
-          floor.fillPoints(
-            [{ x: c.x, y: c.y - HALF_H }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }],
-            true,
-          );
-          floor.lineStyle(1, 0x23262f, 1);
-          floor.strokePoints(
-            [{ x: c.x, y: c.y - HALF_H }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }],
-            true, true,
-          );
+          floor.fillPoints(diamond, true);
+          floor.lineStyle(1, 0x2d313c, 1);
+          floor.strokePoints(diamond, true, true);
           continue;
         }
         const wall = this.add.graphics().setDepth(x + y);

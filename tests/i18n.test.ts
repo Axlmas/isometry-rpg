@@ -34,18 +34,18 @@ describe('I18n', () => {
   it('falls back to English when a translation is missing or malformed', () => {
     const problems: string[] = [];
     const i18n = new I18n({
-      resources: { en, xx: { 'hud.hint': '{broken' } },
+      resources: { en, xx: { 'hud.hintTouch': '{broken' } },
       onProblem: (p) => problems.push(p),
     });
     i18n.setLocale('xx');
-    expect(i18n.t('hud.hint')).toBe(en['hud.hint']);
+    expect(i18n.t('hud.hintTouch')).toBe(en['hud.hintTouch']);
     expect(i18n.t('hud.newDungeon')).toBe(en['hud.newDungeon']);
     expect(problems).toHaveLength(2);
   });
 
   it('never shows a key or an error to the player', () => {
     const i18n = new I18n({ resources: { en: {} } });
-    expect(i18n.t('hud.hint')).toBe('…');
+    expect(i18n.t('hud.hintTouch')).toBe('…');
   });
 
   it('falls back to English for an unknown locale', () => {

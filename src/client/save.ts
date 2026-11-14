@@ -1,7 +1,7 @@
-import { type World, createWorld, isWalkable } from '../sim';
+import { type World, PLAYER_RADIUS, circleFree, createWorld } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -13,7 +13,8 @@ interface SaveData {
   seed: number;
   x: number;
   y: number;
-  tilesWalked: number;
+  /** Total distance walked, in tiles. */
+  distance: number;
 }
 
 export type LoadResult =
@@ -35,37 +36,46 @@ export function openStorage(): KeyValueStore | null {
 }
 
 export function serializeWorld(world: World): string {
-  // The map is not stored: it is rebuilt from the seed. While walking, the
-  // player is saved on the nearest tile.
+  // The map is not stored: it is rebuilt from the seed.
   const data: SaveData = {
     version: SAVE_VERSION,
     seed: world.seed,
-    x: Math.round(world.player.pos.x),
-    y: Math.round(world.player.pos.y),
-    tilesWalked: world.player.tilesWalked,
+    x: world.player.pos.x,
+    y: world.player.pos.y,
+    distance: world.player.distance,
   };
   return JSON.stringify(data);
+}
+
+/** Brings a save written by an older version of the game up to date. */
+function migrate(data: Record<string, unknown>): Record<string, unknown> {
+  // v1 counted whole tiles; v2 stores the distance walked.
+  if (data.version === 1) return { ...data, version: 2, distance: data.tilesWalked };
+  return data;
 }
 
 /** Saved data can be edited or corrupted, so every field is checked. */
 export function parseSave(raw: string | null): LoadResult {
   if (raw === null) return { status: 'none' };
   try {
-    const data = JSON.parse(raw) as Partial<SaveData> | null;
-    const valid =
-      data !== null &&
-      typeof data === 'object' &&
-      data.version === SAVE_VERSION &&
-      Number.isInteger(data.seed) &&
-      Number.isInteger(data.x) &&
-      Number.isInteger(data.y) &&
-      Number.isInteger(data.tilesWalked) &&
-      (data.tilesWalked as number) >= 0;
-    if (!valid) return { status: 'damaged' };
-    const world = createWorld(data.seed as number);
-    if (!isWalkable(world.map, data.x as number, data.y as number)) return { status: 'damaged' };
-    world.player.pos = { x: data.x as number, y: data.y as number };
-    world.player.tilesWalked = data.tilesWalked as number;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { status: 'damaged' };
+    const data = migrate(parsed as Record<string, unknown>) as Partial<SaveData>;
+    const { seed, x, y, distance } = data;
+    if (
+      data.version !== SAVE_VERSION ||
+      typeof seed !== 'number' || !Number.isInteger(seed) ||
+      typeof x !== 'number' || !Number.isFinite(x) ||
+      typeof y !== 'number' || !Number.isFinite(y) ||
+      typeof distance !== 'number' || !Number.isFinite(distance) || distance < 0
+    ) {
+      return { status: 'damaged' };
+    }
+    const world = createWorld(seed);
+    // A position inside or overlapping a wall cannot come from normal play.
+    if (!circleFree(world.map, { x, y }, PLAYER_RADIUS)) return { status: 'damaged' };
+    world.player.pos = { x, y };
+    world.player.distance = distance;
     return { status: 'ok', world };
   } catch {
     return { status: 'damaged' };
