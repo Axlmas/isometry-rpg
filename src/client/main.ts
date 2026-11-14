@@ -1,15 +1,19 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
-import { type GameEvent, type World, MAX_LEVEL, SKILLS, createWorld, isAlive, isNearMerchant, xpToNextLevel } from '../sim';
+import {
+  type GameEvent, type World, type ZoneKind, MAX_LEVEL, SKILLS,
+  characterOf, createWorld, isAlive, isNearMerchant, nearestExit, travelerOf, xpToNextLevel,
+} from '../sim';
+import { DungeonScene } from './DungeonScene';
+import { Hud } from './hud';
 import { InventoryPanel } from './inventoryPanel';
 import { itemName } from './itemView';
 import { QuickBar } from './quickBar';
+import { loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
 import { ShopPanel } from './shopPanel';
-import { DungeonScene } from './DungeonScene';
-import { Hud } from './hud';
-import { characterOf, loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
 import { SkillBar } from './skillBar';
 import { SKILL_NAME } from './skillText';
+import { ZONE_NAME } from './zoneText';
 import './style.css';
 
 const storage = openStorage();
@@ -27,64 +31,48 @@ function newSeed(): number {
 }
 
 const loaded = loadWorld(storage);
-let world: World = loaded.status === 'ok' ? loaded.world : createWorld(newSeed());
+// A new hero starts in the village.
+let world: World = loaded.status === 'ok' ? loaded.world : createWorld(newSeed(), undefined, undefined, 'village');
 
 function persist(): void {
   if (storage) hud.setCanSave(saveWorld(storage, world));
 }
 
+/** What the T key would do right now, shown to the player as a reminder. */
+function promptText(w: World): string | null {
+  if (!isAlive(w) || shop.isOpen) return null;
+  if (isNearMerchant(w)) return i18n.t('prompt.trade');
+  const exit = nearestExit(w);
+  return exit ? i18n.t('prompt.travel', { zone: i18n.t(ZONE_NAME[exit.to]) }) : null;
+}
+
 function showStats(w: World): void {
   hud.setHealth(w.player.hp, w.player.maxHp);
   hud.setMana(w.player.mp, w.player.maxMp);
-  hud.setProgress(w.player.level, w.player.xp, w.player.level < MAX_LEVEL ? xpToNextLevel(w.player.level) : 0, w.dungeonLevel);
-  skillBar.update(w);
-  quickBar.update(w);
-  shop.update(w);
-  hud.setMonsters(w.monsters.length);
+  hud.setProgress(w.player.level, w.player.xp, w.player.level < MAX_LEVEL ? xpToNextLevel(w.player.level) : 0);
+  hud.setZone(i18n.t(ZONE_NAME[w.zone]), w.zone === 'village' ? null : w.dungeonLevel, w.monsters.length);
   hud.setDeathVisible(!isAlive(w));
+  onTick(w);
   inventory.update(w);
 }
 
-const scene = new DungeonScene(world, {
-  onStats: showStats,
-  onCheckpoint: persist,
-  onDeath: (w, xpLost) => {
-    hud.setXpLost(xpLost);
-    showStats(w);
-  },
-  onTick: (w) => {
-    skillBar.update(w);
-    quickBar.update(w);
-    shop.update(w);
-  },
-  onLevelUp: (level, unlocked) => {
-    hud.log(i18n.t('log.levelUp', { level }));
-    for (const id of unlocked) hud.log(i18n.t('log.skillUnlocked', { skill: i18n.t(SKILL_NAME[id]) }));
-  },
-  onSkillDenied: (id, reason) => {
-    if (reason === 'mana') hud.log(i18n.t('log.noMana'), true);
-    else if (reason === 'cooldown') hud.log(i18n.t('log.skillCooling'), true);
-    else hud.log(i18n.t('log.skillLocked', { level: SKILLS[id].unlockLevel }), true);
-  },
-  onPickup: (itemId, count) => {
-    if (itemId === 'coins') {
-      hud.log(i18n.t('log.coins', { count }));
-      return;
-    }
-    const item = itemName(i18n, itemId);
-    hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
-  },
-  onInventoryFull: () => hud.log(i18n.t('log.full'), true),
-  onToggleInventory: () => inventory.toggle(),
-  onToggleShop: () => {
-    // Away from the merchant the key explains where to find him instead of doing nothing.
-    if (shop.isOpen || isNearMerchant(world)) shop.toggle();
-    else hud.log(i18n.t('log.far'), true);
-  },
-  onNotice: showNotice,
-  formatNumber: (value) =>
-    new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
-});
+/** Things that count down or depend on where the hero stands; cheap enough for every tick. */
+function onTick(w: World): void {
+  skillBar.update(w);
+  quickBar.update(w);
+  shop.update(w);
+  hud.setPrompt(promptText(w));
+}
+
+/** Moves the hero to another zone. The village restores them; elsewhere they arrive as they left. */
+function travelTo(to: ZoneKind): void {
+  const hero = to === 'village' ? characterOf(world) : travelerOf(world);
+  world = createWorld(newSeed(), hero, undefined, to, world.zone);
+  shop.toggle(false);
+  scene.setWorld(world);
+  showStats(world);
+  persist();
+}
 
 /** Turns a rule event into a line of text for the player. */
 function showNotice(event: GameEvent): void {
@@ -114,6 +102,47 @@ function showNotice(event: GameEvent): void {
   }
 }
 
+const scene = new DungeonScene(world, {
+  onStats: showStats,
+  onCheckpoint: persist,
+  onDeath: (w, xpLost) => {
+    hud.setXpLost(xpLost);
+    showStats(w);
+  },
+  // A fallen hero wakes up in the village.
+  onRespawn: () => travelTo('village'),
+  onTravel: travelTo,
+  onTick,
+  onLevelUp: (level, unlocked) => {
+    hud.log(i18n.t('log.levelUp', { level }));
+    for (const id of unlocked) hud.log(i18n.t('log.skillUnlocked', { skill: i18n.t(SKILL_NAME[id]) }));
+  },
+  onSkillDenied: (id, reason) => {
+    if (reason === 'mana') hud.log(i18n.t('log.noMana'), true);
+    else if (reason === 'cooldown') hud.log(i18n.t('log.skillCooling'), true);
+    else hud.log(i18n.t('log.skillLocked', { level: SKILLS[id].unlockLevel }), true);
+  },
+  onPickup: (itemId, count) => {
+    if (itemId === 'coins') {
+      hud.log(i18n.t('log.coins', { count }));
+      return;
+    }
+    const item = itemName(i18n, itemId);
+    hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
+  },
+  onInventoryFull: () => hud.log(i18n.t('log.full'), true),
+  onToggleInventory: () => inventory.toggle(),
+  // One key for whatever is next to the hero: the merchant first, then an exit.
+  onInteract: () => {
+    if (shop.isOpen || isNearMerchant(world)) shop.toggle();
+    else if (nearestExit(world)) scene.send({ type: 'travel' });
+    else hud.log(i18n.t('log.nothingNear'), true);
+  },
+  onNotice: showNotice,
+  formatNumber: (value) =>
+    new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
+});
+
 const skillBar = new SkillBar(i18n, (id) => scene.useSkill(id, false));
 const quickBar = new QuickBar(i18n, (command) => scene.send(command));
 // The hero does not swing a weapon while talking to the merchant.
@@ -131,15 +160,7 @@ const hud = new Hud({
     hud.render();
     inventory.render(true);
     shop.render(true);
-    skillBar.update();
-    quickBar.update();
-  },
-  onNewDungeon: () => {
-    // The hero keeps their belongings; only the dungeon is replaced.
-    world = createWorld(newSeed(), characterOf(world));
-    scene.setWorld(world);
     showStats(world);
-    persist();
   },
   onRespawn: () => scene.send({ type: 'respawn' }),
 });

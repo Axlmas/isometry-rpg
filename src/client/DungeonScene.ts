@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import {
-  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type SkillId, type World,
+  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type SkillId, type World, type ZoneKind,
   ITEMS, PLAYER_ATTACK_ARC, SKILLS, SKILL_IDS, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
   isAlive, isMoving, isWalkable, step, tileAt,
 } from '../sim';
@@ -8,6 +8,7 @@ import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
 import { QUICK_KEYS } from './quickBar';
 import { SKILL_KEYS } from './skillText';
+import { EXIT_COLOR, ZONE_LOOK } from './zoneText';
 
 const WALL_HEIGHT = 30;
 const HALF_W = TILE_WIDTH / 2;
@@ -30,7 +31,8 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
 };
 const ATTACK_KEY = 'Space';
 const INVENTORY_KEY = 'KeyI';
-const SHOP_KEY = 'KeyT';
+/** One key for whatever is next to the hero: the merchant, an exit. */
+const INTERACT_KEY = 'KeyT';
 /** Keys that send one command when pressed. */
 const COMMAND_KEYS: Record<string, Command> = {
   [QUICK_KEYS.healthPotion]: { type: 'use', itemId: 'healthPotion' },
@@ -52,7 +54,11 @@ export interface SceneEvents {
   onPickup(itemId: ItemId, count: number): void;
   onInventoryFull(): void;
   onToggleInventory(): void;
-  onToggleShop(): void;
+  onInteract(): void;
+  /** The hero walked through an exit. */
+  onTravel(to: ZoneKind): void;
+  /** The hero asked to rise after dying. */
+  onRespawn(): void;
   /** Something the player should be told in words: a refusal, a purchase, a sale. */
   onNotice(event: GameEvent): void;
   /** Formats a number for the player's language. */
@@ -117,9 +123,8 @@ export class DungeonScene extends Phaser.Scene {
       const command = COMMAND_KEYS[event.code];
       const known =
         event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY ||
-        event.code === SHOP_KEY || skill !== undefined || command !== undefined;
+        event.code === INTERACT_KEY || skill !== undefined || command !== undefined;
       if (!known || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (document.querySelector('dialog[open]')) return; // Keys belong to the dialog.
       if (event.code === INVENTORY_KEY) {
         if (!event.repeat) this.events_.onToggleInventory();
         return;
@@ -128,8 +133,8 @@ export class DungeonScene extends Phaser.Scene {
         if (!event.repeat) this.useSkill(skill, true);
         return;
       }
-      if (event.code === SHOP_KEY) {
-        if (!event.repeat) this.events_.onToggleShop();
+      if (event.code === INTERACT_KEY) {
+        if (!event.repeat) this.events_.onInteract();
         return;
       }
       if (command !== undefined) {
@@ -177,8 +182,10 @@ export class DungeonScene extends Phaser.Scene {
     this.heldKeys.clear();
     this.marker.setVisible(false);
     for (const object of this.mapObjects) object.destroy();
+    this.cameras.main.setBackgroundColor(ZONE_LOOK[world.zone].background);
     this.mapObjects = this.drawMap();
-    this.mapObjects.push(this.drawMerchant());
+    if (world.merchant) this.mapObjects.push(this.drawMerchant(world.merchant));
+    for (const exit of world.exits) this.mapObjects.push(this.drawExit(exit.pos, EXIT_COLOR[exit.to]));
     for (const sprite of this.monsterSprites.values()) sprite.container.destroy();
     this.monsterSprites.clear();
     this.syncMonsters(1);
@@ -430,8 +437,11 @@ export class DungeonScene extends Phaser.Scene {
         this.events_.onDeath(this.world, event.xpLost);
         return true;
       case 'playerRespawned':
-        this.setWorld(this.world);
-        return true;
+        this.events_.onRespawn();
+        return false; // The new zone is saved by whoever builds it.
+      case 'travel':
+        this.events_.onTravel(event.to);
+        return false;
       case 'lootDropped':
         return false; // Drawn every frame from the world's loot list.
       case 'itemPicked':
@@ -541,12 +551,20 @@ export class DungeonScene extends Phaser.Scene {
     return { container, body, bar, previous: { ...monster.pos }, lastHp: -1 };
   }
 
-  private drawMonsterBody(sprite: MonsterSprite, windingUp: boolean): void {
+  private drawMonsterBody(sprite: MonsterSprite, kind: Monster['kind'], windingUp: boolean): void {
     const g = sprite.body;
     g.clear();
     g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 30, 14);
     // The warning before a blow: the monster turns bright and a ring appears under it.
     if (windingUp) g.lineStyle(3, 0xffb347, 1).strokeEllipse(0, 0, 44, 22);
+    if (kind === 'wolf') {
+      // Low and long, with pointed ears.
+      g.fillStyle(windingUp ? 0xd8663a : 0x8a8f99).fillEllipse(0, -11, 34, 16);
+      g.fillStyle(windingUp ? 0xd8663a : 0x9aa0ab).fillCircle(11, -17, 8);
+      g.fillTriangle(6, -22, 9, -30, 12, -22).fillTriangle(12, -22, 15, -30, 18, -22);
+      g.fillStyle(0xf4e9c8).fillCircle(9, -18, 1.8).fillCircle(14, -18, 1.8);
+      return;
+    }
     g.fillStyle(windingUp ? 0xd8663a : 0x7d3b3b).fillRoundedRect(-12, -26, 24, 24, 9);
     g.fillStyle(0xf4e9c8).fillCircle(-5, -17, 3).fillCircle(5, -17, 3);
     g.fillStyle(0x12141a).fillCircle(-5, -17, 1.2).fillCircle(5, -17, 1.2);
@@ -570,7 +588,7 @@ export class DungeonScene extends Phaser.Scene {
       const key = monster.hp * 2 + (windingUp ? 1 : 0);
       if (key !== sprite.lastHp) {
         sprite.lastHp = key;
-        this.drawMonsterBody(sprite, windingUp);
+        this.drawMonsterBody(sprite, monster.kind, windingUp);
         sprite.bar.clear();
         if (monster.hp < monster.maxHp) {
           sprite.bar.fillStyle(0x12141a, 0.9).fillRect(-16, -38, 32, 6);
@@ -585,8 +603,18 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
-  private drawMerchant(): Phaser.GameObjects.Graphics {
-    const { merchant } = this.world;
+  /** A glowing patch between two posts: a way out of the zone. */
+  private drawExit(pos: Point, color: number): Phaser.GameObjects.Graphics {
+    const at = tileToScreen(pos.x, pos.y);
+    const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(pos.x + pos.y - 0.4);
+    g.fillStyle(color, 0.3).fillEllipse(0, 0, 56, 28);
+    g.lineStyle(3, color, 0.9).strokeEllipse(0, 0, 56, 28);
+    g.fillStyle(0x3a3530).fillRect(-30, -40, 7, 42).fillRect(23, -40, 7, 42);
+    g.fillStyle(color).fillCircle(-26.5, -44, 5).fillCircle(26.5, -44, 5);
+    return g;
+  }
+
+  private drawMerchant(merchant: Point): Phaser.GameObjects.Graphics {
     const at = tileToScreen(merchant.x, merchant.y);
     const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(merchant.x + merchant.y);
     g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 32, 15);
@@ -642,35 +670,59 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private drawMap(): Phaser.GameObjects.GameObject[] {
-    const { map } = this.world;
+    const { map, zone } = this.world;
+    const look = ZONE_LOOK[zone];
     const objects: Phaser.GameObjects.GameObject[] = [];
     const floor = this.add.graphics().setDepth(-1000);
     objects.push(floor);
+    const roadRow = Math.floor(map.height / 2);
 
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const c = tileToScreen(x, y);
-        if (tileAt(map, x, y) !== TILE_WALL) {
+        const border = x === 0 || y === 0 || x === map.width - 1 || y === map.height - 1;
+        const isWall = tileAt(map, x, y) === TILE_WALL;
+        // Trees stand on grass, so the ground is drawn under them too.
+        if (!isWall || look.walls === 'trees') {
           // Cosmetic variation only; it does not come from the game's RNG.
           const shade = ((x * 7 + y * 13) % 5) * 2;
+          const base = look.road && y === roadRow && !isWall ? look.road : look.floor;
           const diamond = [{ x: c.x, y: c.y - HALF_H }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }];
-          floor.fillStyle(Phaser.Display.Color.GetColor(52 + shade, 56 + shade, 68 + shade));
+          floor.fillStyle(Phaser.Display.Color.GetColor(base[0] + shade, base[1] + shade, base[2] + shade));
           floor.fillPoints(diamond, true);
-          floor.lineStyle(1, 0x2d313c, 1);
+          floor.lineStyle(1, look.grid, 0.5);
           floor.strokePoints(diamond, true, true);
-          continue;
         }
+        if (!isWall) continue;
+
         const wall = this.add.graphics().setDepth(x + y);
-        const top = c.y - WALL_HEIGHT;
-        wall.fillStyle(0x4a4038); // left face
-        wall.fillPoints([{ x: c.x - HALF_W, y: top }, { x: c.x, y: top + HALF_H }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }], true);
-        wall.fillStyle(0x362e28); // right face
-        wall.fillPoints([{ x: c.x, y: top + HALF_H }, { x: c.x + HALF_W, y: top }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }], true);
-        wall.fillStyle(0x6b5d50); // top
-        wall.fillPoints([{ x: c.x, y: top - HALF_H }, { x: c.x + HALF_W, y: top }, { x: c.x, y: top + HALF_H }, { x: c.x - HALF_W, y: top }], true);
+        if (look.walls === 'trees') this.drawTree(wall, c, (x * 31 + y * 17) % 3);
+        else if (look.walls === 'wood' && !border) this.drawBlock(wall, c, 44, 0x8c7a5e, 0x6f6049, 0xa34a3a); // a house with a red roof
+        else if (look.walls === 'wood') this.drawBlock(wall, c, 34, 0x6b4a2a, 0x4f361e, 0x86603a); // the palisade
+        else this.drawBlock(wall, c, WALL_HEIGHT, 0x4a4038, 0x362e28, 0x6b5d50);
         objects.push(wall);
       }
     }
     return objects;
+  }
+
+  /** A box standing on a tile: left face, right face and top, each in its own colour. */
+  private drawBlock(g: Phaser.GameObjects.Graphics, c: Point, height: number, left: number, right: number, top: number): void {
+    const t = c.y - height;
+    g.fillStyle(left);
+    g.fillPoints([{ x: c.x - HALF_W, y: t }, { x: c.x, y: t + HALF_H }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }], true);
+    g.fillStyle(right);
+    g.fillPoints([{ x: c.x, y: t + HALF_H }, { x: c.x + HALF_W, y: t }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }], true);
+    g.fillStyle(top);
+    g.fillPoints([{ x: c.x, y: t - HALF_H }, { x: c.x + HALF_W, y: t }, { x: c.x, y: t + HALF_H }, { x: c.x - HALF_W, y: t }], true);
+  }
+
+  /** `variant` (0-2) changes the size and tint a little so a forest does not look stamped. */
+  private drawTree(g: Phaser.GameObjects.Graphics, c: Point, variant: number): void {
+    const size = 20 + variant * 3;
+    g.fillStyle(0x000000, 0.3).fillEllipse(c.x, c.y, 40, 18);
+    g.fillStyle(0x5a3f26).fillRect(c.x - 4, c.y - 22, 8, 22);
+    g.fillStyle([0x2f6b3a, 0x357a41, 0x2a5f34][variant] as number).fillCircle(c.x, c.y - 34, size);
+    g.fillStyle([0x3d8249, 0x46924f, 0x377843][variant] as number).fillCircle(c.x - 5, c.y - 40, size * 0.6);
   }
 }

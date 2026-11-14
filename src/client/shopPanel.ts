@@ -24,7 +24,6 @@ export class ShopPanel {
     if (open !== this.isOpen) this.onToggle(open);
     element('shop').hidden = !open;
     if (open) this.render(true);
-    this.updatePrompt();
   }
 
   /** Call whenever the world may have changed. Closes the window when the hero walks away. */
@@ -32,7 +31,6 @@ export class ShopPanel {
     const changed = world !== this.world;
     this.world = world;
     if (this.isOpen && (!isNearMerchant(world) || world.player.hp <= 0)) this.toggle(false);
-    this.updatePrompt();
     this.render(changed);
   }
 
@@ -83,11 +81,5 @@ export class ShopPanel {
     button.disabled = disabled;
     button.addEventListener('click', () => this.send(command));
     return button;
-  }
-
-  /** The "press T" reminder appears only when trading is possible and the window is closed. */
-  private updatePrompt(): void {
-    const { world } = this;
-    element('prompt').hidden = !world || this.isOpen || world.player.hp <= 0 || !isNearMerchant(world);
   }
 }

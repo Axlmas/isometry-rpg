@@ -1,11 +1,11 @@
 import {
-  type Character, type EquipSlot, type ItemId, type ItemStack, type World,
+  type Character, type EquipSlot, type ItemId, type ItemStack, type World, type ZoneKind,
   EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
-  characterOf, circleFree, createWorld, isItemId, maxStackOf, newCharacter, xpToNextLevel,
+  circleFree, createWorld, isItemId, isZoneKind, maxStackOf, newCharacter, xpToNextLevel,
 } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -14,6 +14,8 @@ export type KeyValueStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 interface SaveData {
   version: number;
+  /** Which zone the hero is in. */
+  zone: ZoneKind;
   seed: number;
   x: number;
   y: number;
@@ -66,6 +68,7 @@ export function serializeWorld(world: World): string {
   for (let id = 0; id < world.monsterTotal; id++) if (!alive.has(id)) dead.push(id);
   const data: SaveData = {
     version: SAVE_VERSION,
+    zone: world.zone,
     seed: world.seed,
     x: world.player.pos.x,
     y: world.player.pos.y,
@@ -104,6 +107,8 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
   if (current.version === 4) current = { ...current, version: 5, level: 1, xp: 0, mp: null, dungeonLevel: 1 };
   // v6 added consumables; weapon charges start switched off.
   if (current.version === 5) current = { ...current, version: 6, chargesOn: false };
+  // v7 added zones; older saves were always inside a dungeon.
+  if (current.version === 6) current = { ...current, version: 7, zone: 'dungeon' };
   return current;
 }
 
@@ -164,10 +169,11 @@ export function parseSave(raw: string | null): LoadResult {
     }
     const character = parseCharacter(data);
     if (!character) return { status: 'damaged' };
-    const { dungeonLevel, mp, chargesOn } = data;
+    const { dungeonLevel, mp, chargesOn, zone } = data;
+    if (!isZoneKind(zone)) return { status: 'damaged' };
     if (typeof chargesOn !== 'boolean') return { status: 'damaged' };
     if (!isInt(dungeonLevel) || dungeonLevel < 1 || dungeonLevel > MAX_LEVEL) return { status: 'damaged' };
-    const world = createWorld(seed, character, dungeonLevel);
+    const world = createWorld(seed, character, dungeonLevel, zone);
     if (mp !== null) {
       if (!isInt(mp) || mp < 0 || mp > world.player.maxMp) return { status: 'damaged' };
       world.player.mp = mp;
@@ -233,9 +239,6 @@ export function saveWorld(store: KeyValueStore | null, world: World): boolean {
     return false;
   }
 }
-
-/** The hero's belongings, to carry into the next dungeon. */
-export { characterOf };
 
 export function loadLocale(store: KeyValueStore | null): string | null {
   try {

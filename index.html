@@ -19,10 +19,10 @@
       <p><span id="level"></span> · <span id="xp-text"></span></p>
       <p id="hero-stats"></p>
       <p id="coins"></p>
-      <p><span id="dungeon-level"></span> · <span id="monsters"></span></p>
+      <p id="zone"></p>
+      <p id="monsters"></p>
       <div class="actions">
         <button id="inventory-open" type="button" class="small" aria-expanded="false" aria-controls="inventory" data-i18n="inventory.open"></button>
-        <button id="new-dungeon" type="button" class="small" data-i18n="hud.newDungeon"></button>
         <button id="language" type="button" class="small"></button>
       </div>
       <details id="controls">
@@ -59,17 +59,8 @@
     <ul id="shop-bag" class="item-list"></ul>
   </aside>
 
-  <p id="prompt" data-i18n="shop.prompt" hidden></p>
+  <p id="prompt" hidden></p>
   <div id="skills" role="toolbar"></div>
-
-  <dialog id="confirm-new">
-    <h2 data-i18n="confirm.newDungeon.title"></h2>
-    <p data-i18n="confirm.newDungeon.body"></p>
-    <form method="dialog">
-      <button value="no" class="primary" data-i18n="confirm.newDungeon.no"></button>
-      <button value="yes" data-i18n="confirm.newDungeon.yes"></button>
-    </form>
-  </dialog>
 
   <div id="death" class="overlay" role="alertdialog" aria-labelledby="death-title" aria-describedby="death-body" hidden>
     <div>

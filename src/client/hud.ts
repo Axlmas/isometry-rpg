@@ -12,7 +12,6 @@ export interface HudOptions {
   /** Open the controls summary; meant for a player's first launch. */
   showControls: boolean;
   onLanguageToggle(): void;
-  onNewDungeon(): void;
   onRespawn(): void;
 }
 
@@ -22,8 +21,7 @@ export class Hud {
   private canSave: boolean;
   private health = { current: 0, max: 1 };
   private mana = { current: 0, max: 1 };
-  private progress = { level: 1, xp: 0, needed: 1, dungeonLevel: 1 };
-  private monsters = 0;
+  private progress = { level: 1, xp: 0, needed: 1 };
   private xpLost = 0;
   private toastTimer: number | undefined;
 
@@ -32,12 +30,7 @@ export class Hud {
     this.canSave = options.canSave;
 
     element<HTMLDetailsElement>('controls').open = options.showControls;
-    const dialog = element<HTMLDialogElement>('confirm-new');
     element('language').addEventListener('click', options.onLanguageToggle);
-    element('new-dungeon').addEventListener('click', () => dialog.showModal());
-    dialog.addEventListener('close', () => {
-      if (dialog.returnValue === 'yes') options.onNewDungeon();
-    });
     element('error-reload').addEventListener('click', () => window.location.reload());
     element('death-respawn').addEventListener('click', options.onRespawn);
 
@@ -66,13 +59,12 @@ export class Hud {
   }
 
   /** `needed` is zero at the maximum level. */
-  setProgress(level: number, xp: number, needed: number, dungeonLevel: number): void {
-    this.progress = { level, xp, needed, dungeonLevel };
+  setProgress(level: number, xp: number, needed: number): void {
+    this.progress = { level, xp, needed };
     const { i18n } = this;
     element('level').textContent = i18n.t('hud.level', { level });
     element('xp-text').textContent = needed > 0 ? i18n.t('hud.xp', { current: xp, needed }) : i18n.t('hud.xpMax');
     element('xp-fill').style.inlineSize = `${needed > 0 ? Math.min(100, (xp / needed) * 100) : 100}%`;
-    element('dungeon-level').textContent = i18n.t('hud.dungeonLevel', { level: dungeonLevel });
   }
 
   /** How much experience the last death cost; shown on the defeat screen. */
@@ -81,11 +73,21 @@ export class Hud {
     element('death-xp').textContent = this.i18n.t('death.xpLost', { count: amount });
   }
 
-  setMonsters(count: number): void {
-    this.monsters = count;
+  /** `level` is null in a safe zone, where there is nothing to fight. */
+  setZone(zone: string, level: number | null, monsters: number): void {
+    const { i18n } = this;
+    element('zone').textContent = level === null ? i18n.t('hud.zoneSafe', { zone }) : i18n.t('hud.zoneLevel', { zone, level });
     const label = element('monsters');
-    label.textContent = this.i18n.t('hud.monsters', { count });
-    label.classList.toggle('cleared', count === 0);
+    label.hidden = level === null;
+    label.textContent = i18n.t('hud.monsters', { count: monsters });
+    label.classList.toggle('cleared', monsters === 0);
+  }
+
+  /** A one-line reminder of what the interaction key does here; null hides it. */
+  setPrompt(text: string | null): void {
+    const prompt = element('prompt');
+    if (prompt.hidden !== (text === null)) prompt.hidden = text === null;
+    if (text !== null && prompt.textContent !== text) prompt.textContent = text;
   }
 
   setDeathVisible(visible: boolean): void {
@@ -144,8 +146,7 @@ export class Hud {
     element('error-body').textContent = i18n.t(this.canSave ? 'error.body' : 'error.bodyNoSave');
     this.setHealth(this.health.current, this.health.max);
     this.setMana(this.mana.current, this.mana.max);
-    this.setProgress(this.progress.level, this.progress.xp, this.progress.needed, this.progress.dungeonLevel);
+    this.setProgress(this.progress.level, this.progress.xp, this.progress.needed);
     this.setXpLost(this.xpLost);
-    this.setMonsters(this.monsters);
   }
 }

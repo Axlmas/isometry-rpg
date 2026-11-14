@@ -1,7 +1,6 @@
 {
   "game.title": "Working title of the game. Do not translate until a final name is chosen.",
   "hud.language": "Button label. {language} is the language's own name (for example 'Русский') and is not translated.",
-  "confirm.newDungeon.yes": "Destructive action button. Keep it short: it sits next to another button on a phone screen.",
   "error.body": "'Last stop' means the last time the hero finished walking; that is when the game saves.",
   "hud.health": "Shown under the health bar and read by screen readers.",
   "hud.monsters": "{count} is the number of living monsters in the dungeon. The =0 form is a short victory message.",
@@ -15,7 +14,6 @@
   "item.leather": "All item.* names: dictionary form, capitalised as a title in English, sentence case in Russian.",
   "hud.xp": "Follows the level after a dot on the same line ('Level 3 · experience 40 of 260'), so it starts with a lower-case letter.",
   "hud.xpMax": "Shown in place of hud.xp at the last level; same position, lower-case start.",
-  "hud.dungeonLevel": "How strong the monsters of the current dungeon are. Followed by the monster count on the same line.",
   "skills.cooldown": "Shown on a small skill button. {seconds} is whole seconds; 's' is the abbreviation for seconds.",
   "skills.locked": "Shown on a skill button the hero cannot use yet. Keep it very short.",
   "skillInfo.heavyBlow": "All skillInfo.* texts are tooltips: one sentence saying what the skill does, no numbers.",
@@ -23,7 +21,10 @@
   "inventory.use": "Button next to a potion in the bag.",
   "shop.buyMany": "Button that buys several at once; {count} is 10 or 100.",
   "shop.noValue": "Shown instead of a price next to a bag item the merchant refuses to buy.",
-  "shop.prompt": "Appears when the hero stands next to the merchant. T is a physical key.",
   "log.noneLeft": "{item} is a potion name in dictionary form. Phrase the message so that form fits.",
-  "item.chargePlain": "A consumable that strengthens weapon blows. The grade in brackets says which weapons it fits."
+  "item.chargePlain": "A consumable that strengthens weapon blows. The grade in brackets says which weapons it fits.",
+  "hud.zoneLevel": "{zone} is the name of the place; {level} is how strong its monsters are.",
+  "zone.village": "Names of places in the game's own world. Translate the meaning (a quiet ford, a heather moor, old mines), do not transliterate.",
+  "prompt.travel": "{zone} is a place name in dictionary form. Phrase the message so that form fits.",
+  "prompt.trade": "Appears when the hero stands next to the merchant. T is a physical key."
 }
