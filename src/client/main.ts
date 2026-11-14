@@ -116,7 +116,8 @@ function showNotice(event: GameEvent): void {
 
 const skillBar = new SkillBar(i18n, (id) => scene.useSkill(id, false));
 const quickBar = new QuickBar(i18n, (command) => scene.send(command));
-const shop = new ShopPanel(i18n, (command) => scene.send(command));
+// The hero does not swing a weapon while talking to the merchant.
+const shop = new ShopPanel(i18n, (command) => scene.send(command), (open) => scene.setPeaceful(open));
 const inventory = new InventoryPanel(i18n, (command) => scene.send(command));
 
 const hud = new Hud({

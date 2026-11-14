@@ -82,6 +82,7 @@ export class DungeonScene extends Phaser.Scene {
   private lastStats = '';
   private readonly heldKeys = new Set<string>();
   private holdTimer = 0;
+  private peaceful = false;
   private mapObjects: Phaser.GameObjects.GameObject[] = [];
   private readonly monsterSprites = new Map<number, MonsterSprite>();
   private readonly lootSprites = new Map<number, Phaser.GameObjects.Graphics>();
@@ -104,6 +105,7 @@ export class DungeonScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (!this.isOnGame(pointer)) return;
       this.holdTimer = 0;
       if (this.isMoveOrder(pointer)) this.orderMoveTo(pointer);
       else this.orderAttackAt(pointer);
@@ -189,6 +191,11 @@ export class DungeonScene extends Phaser.Scene {
     this.reportStats();
   }
 
+  /** While true (the hero is talking to someone), attacks and strike skills are not sent. Walking still works. */
+  setPeaceful(peaceful: boolean): void {
+    this.peaceful = peaceful;
+  }
+
   /** Sends a command from outside the scene, for example from a HUD button. */
   send(command: Command): void {
     this.pending.push(command);
@@ -199,6 +206,7 @@ export class DungeonScene extends Phaser.Scene {
    * button the cursor is on the button, so the hero aims at the nearest monster.
    */
   useSkill(id: SkillId, aimAtCursor: boolean): void {
+    if (this.peaceful && SKILLS[id].effect.kind === 'strike') return;
     const { pos } = this.world.player;
     let dir: Point;
     if (aimAtCursor) {
@@ -252,9 +260,18 @@ export class DungeonScene extends Phaser.Scene {
     return pointer.wasTouch || pointer.rightButtonDown();
   }
 
+  /**
+   * Phaser also hears presses outside the canvas. A press that started on a
+   * HUD button or panel belongs to the interface and must not move or attack.
+   */
+  private isOnGame(pointer: Phaser.Input.Pointer): boolean {
+    return pointer.downElement === this.game.canvas;
+  }
+
   private readHeldInput(delta: number): void {
     const pointer = this.input.activePointer;
-    if (pointer.isDown && this.isMoveOrder(pointer)) {
+    const held = pointer.isDown && this.isOnGame(pointer);
+    if (held && this.isMoveOrder(pointer)) {
       // Holding the right button or a finger keeps the hero walking towards it.
       if (!this.hasDirectionKeys()) {
         this.holdTimer += delta;
@@ -263,10 +280,10 @@ export class DungeonScene extends Phaser.Scene {
           this.orderMoveTo(pointer);
         }
       }
-    } else if (pointer.isDown && pointer.leftButtonDown() && this.world.player.attackCooldown === 0) {
+    } else if (held && pointer.leftButtonDown() && this.world.player.attackCooldown === 0) {
       this.orderAttackAt(pointer);
     }
-    if (this.heldKeys.has(ATTACK_KEY) && this.world.player.attackCooldown === 0) {
+    if (this.heldKeys.has(ATTACK_KEY) && this.world.player.attackCooldown === 0 && !this.peaceful) {
       this.orderAutoAttack();
     }
   }
@@ -290,6 +307,7 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private orderAttackAt(pointer: Phaser.Input.Pointer): void {
+    if (this.peaceful) return;
     const { world } = this.pointerInWorld(pointer);
     const { pos } = this.world.player;
     this.pending.push({ type: 'attack', dx: world.x - pos.x, dy: world.y - pos.y });

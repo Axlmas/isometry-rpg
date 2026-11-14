@@ -10,6 +10,8 @@ export class ShopPanel {
   constructor(
     private readonly i18n: I18n,
     private readonly send: (command: Command) => void,
+    /** Told whenever the window opens or closes. */
+    private readonly onToggle: (open: boolean) => void,
   ) {
     element('shop-close').addEventListener('click', () => this.toggle(false));
   }
@@ -19,6 +21,7 @@ export class ShopPanel {
   }
 
   toggle(open = !this.isOpen): void {
+    if (open !== this.isOpen) this.onToggle(open);
     element('shop').hidden = !open;
     if (open) this.render(true);
     this.updatePrompt();
