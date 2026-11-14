@@ -1,0 +1,39 @@
+:root {
+  color-scheme: dark;
+  --ink: #e6e1d6;
+  --muted: #a39d92;
+  --panel: rgba(18, 20, 26, 0.82);
+  --accent: #e8c36a;
+  --warning: #f0a070;
+}
+html, body { margin: 0; height: 100%; overflow: hidden; background: #12141a; color: var(--ink);
+  /* System fonts cover Latin and Cyrillic; add script-specific fallbacks here with new locales. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
+#game { position: fixed; inset: 0; touch-action: none; }
+#hud { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column;
+  justify-content: space-between; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); }
+#hud > * { pointer-events: auto; }
+.panel { background: var(--panel); border: 1px solid #2a2d36; border-radius: 10px; padding: 10px 14px;
+  max-width: min(100%, 520px); box-sizing: border-box; }
+h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.04em; }
+p { margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
+#hint, #save-status { color: var(--muted); font-size: 14px; }
+#save-status.warning { color: var(--warning); }
+#steps { font-size: 15px; margin-block: 2px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
+button { font: inherit; color: var(--ink); background: #2a2d36; border: 1px solid #454956; border-radius: 8px;
+  padding: 10px 14px; min-height: 44px; cursor: pointer; text-align: start; }
+button:hover { background: #343844; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: #6b4f1d; border-color: var(--accent); }
+dialog { background: #1b1e26; color: var(--ink); border: 1px solid #454956; border-radius: 12px; padding: 20px;
+  max-width: min(92vw, 420px); }
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog h2, #error h2 { margin: 0 0 8px; font-size: 20px; }
+dialog form { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 16px; }
+#toast { position: fixed; inset-inline: 12px; top: 50%; margin-inline: auto; width: fit-content; max-width: min(92vw, 420px);
+  background: #1b1e26; border: 1px solid var(--accent); border-radius: 10px; padding: 12px 16px; }
+#error { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.75); padding: 16px; }
+#error > div { background: #1b1e26; border: 1px solid #454956; border-radius: 12px; padding: 20px; max-width: 420px; }
+#error button { margin-block-start: 16px; }
+[hidden] { display: none !important; }

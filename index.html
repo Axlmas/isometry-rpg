@@ -1,59 +1,53 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Isometry RPG</title>
-  <style>
-    :root { color-scheme: dark; }
-    html, body { margin: 0; height: 100%; background: #12141a; color: #e6e1d6;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-    body { display: grid; place-items: center; }
-    main { text-align: center; padding: 16px; }
-    canvas { display: block; margin: 0 auto 16px; max-width: 100%; }
-    h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0.04em; }
-    p { margin: 0; color: #8f8a80; }
-  </style>
 </head>
 <body>
-  <main>
-    <canvas id="grid" width="480" height="260"></canvas>
-    <h1>Isometry RPG</h1>
-    <p>Игра в разработке. Деплой работает.</p>
-  </main>
-  <script>
-    // Placeholder: animated isometric tile grid to confirm the deploy pipeline works.
-    const canvas = document.getElementById('grid');
-    const ctx = canvas.getContext('2d');
-    const TILE_W = 48, TILE_H = 24, N = 8;
-    const ox = canvas.width / 2, oy = 30;
+  <div id="game"></div>
 
-    function tile(x, y, lift, hue) {
-      const cx = ox + (x - y) * TILE_W / 2;
-      const cy = oy + (x + y) * TILE_H / 2 - lift;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + TILE_W / 2, cy + TILE_H / 2);
-      ctx.lineTo(cx, cy + TILE_H);
-      ctx.lineTo(cx - TILE_W / 2, cy + TILE_H / 2);
-      ctx.closePath();
-      ctx.fillStyle = `hsl(${hue}, 35%, ${28 + lift / 2}%)`;
-      ctx.fill();
-      ctx.strokeStyle = '#12141a';
-      ctx.stroke();
-    }
+  <div id="hud">
+    <header class="panel">
+      <h1 data-i18n="game.title"></h1>
+      <p id="steps"></p>
+      <p id="hint" data-i18n="hud.hint"></p>
+    </header>
+    <footer class="panel">
+      <div class="actions">
+        <button id="new-dungeon" type="button" data-i18n="hud.newDungeon"></button>
+        <button id="language" type="button"></button>
+      </div>
+      <p id="save-status"></p>
+    </footer>
+  </div>
 
-    function frame(t) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let y = 0; y < N; y++) {
-        for (let x = 0; x < N; x++) {
-          const lift = Math.max(0, Math.sin(t / 600 - (x + y) / 2) * 10);
-          tile(x, y, lift, 150 + (x + y) * 6);
-        }
-      }
-      requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-  </script>
+  <dialog id="confirm-new">
+    <h2 data-i18n="confirm.newDungeon.title"></h2>
+    <p data-i18n="confirm.newDungeon.body"></p>
+    <form method="dialog">
+      <button value="no" class="primary" data-i18n="confirm.newDungeon.no"></button>
+      <button value="yes" data-i18n="confirm.newDungeon.yes"></button>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div id="error" role="alertdialog" aria-labelledby="error-title" aria-describedby="error-body" hidden>
+    <div>
+      <h2 id="error-title" data-i18n="error.title"></h2>
+      <p id="error-body"></p>
+      <button id="error-reload" type="button" class="primary" data-i18n="error.reload"></button>
+    </div>
+  </div>
+
+  <!-- The only text outside the translation catalogue: without JavaScript the catalogue cannot load. -->
+  <noscript>
+    <p style="padding:24px">This game needs JavaScript. Please enable it and reload the page.<br>
+    Для игры нужен JavaScript. Включите его и перезагрузите страницу.</p>
+  </noscript>
+
+  <script type="module" src="/src/client/main.ts"></script>
 </body>
 </html>
