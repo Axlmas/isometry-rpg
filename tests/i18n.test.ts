@@ -4,7 +4,7 @@ import en from '../src/i18n/locales/en.json';
 import { pseudolocalize } from '../src/i18n/pseudo';
 
 const KEYS = Object.keys(en) as MessageKey[];
-const SAMPLE = { count: 3, language: 'English', current: 40, max: 100 };
+const SAMPLE = { count: 3, language: 'English', current: 40, max: 100, min: 1, defense: 2, used: 3, total: 24, value: 2, item: 'Coal' };
 
 describe('I18n', () => {
   it('formats every message in every locale without problems', () => {
@@ -29,23 +29,27 @@ describe('I18n', () => {
     i18n.setLocale('en');
     expect(i18n.t('hud.monsters', { count: 1 })).toBe('1 monster left');
     expect(i18n.t('hud.health', { current: 1234, max: 5000 })).toBe('Health: 1,234 of 5,000');
+    expect(i18n.t('log.coins', { count: 1 })).toBe('+1 coin');
+    i18n.setLocale('ru');
+    expect(i18n.t('hud.coins', { count: 22 })).toBe('22 монеты');
+    expect(i18n.t('log.coins', { count: 5 })).toBe('+5 монет');
   });
 
   it('falls back to English when a translation is missing or malformed', () => {
     const problems: string[] = [];
     const i18n = new I18n({
-      resources: { en, xx: { 'hud.hintTouch': '{broken' } },
+      resources: { en, xx: { 'hud.hint': '{broken' } },
       onProblem: (p) => problems.push(p),
     });
     i18n.setLocale('xx');
-    expect(i18n.t('hud.hintTouch')).toBe(en['hud.hintTouch']);
+    expect(i18n.t('hud.hint')).toBe(en['hud.hint']);
     expect(i18n.t('hud.newDungeon')).toBe(en['hud.newDungeon']);
     expect(problems).toHaveLength(2);
   });
 
   it('never shows a key or an error to the player', () => {
     const i18n = new I18n({ resources: { en: {} } });
-    expect(i18n.t('hud.hintTouch')).toBe('…');
+    expect(i18n.t('hud.hint')).toBe('…');
   });
 
   it('falls back to English for an unknown locale', () => {

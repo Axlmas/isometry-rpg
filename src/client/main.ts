@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import { type World, createWorld, isAlive } from '../sim';
+import { InventoryPanel } from './inventoryPanel';
+import { ITEM_NAME } from './itemText';
 import { DungeonScene } from './DungeonScene';
 import { Hud } from './hud';
-import { loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
+import { characterOf, loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
 import './style.css';
 
 const storage = openStorage();
@@ -31,15 +33,28 @@ function showStats(w: World): void {
   hud.setHealth(w.player.hp, w.player.maxHp);
   hud.setMonsters(w.monsters.length);
   hud.setDeathVisible(!isAlive(w));
+  inventory.update(w);
 }
 
 const scene = new DungeonScene(world, {
   onStats: showStats,
   onCheckpoint: persist,
   onDeath: showStats,
+  onPickup: (itemId, count) => {
+    if (itemId === 'coins') {
+      hud.log(i18n.t('log.coins', { count }));
+      return;
+    }
+    const item = i18n.t(ITEM_NAME[itemId]);
+    hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
+  },
+  onInventoryFull: () => hud.log(i18n.t('log.full'), true),
+  onToggleInventory: () => inventory.toggle(),
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
 });
+
+const inventory = new InventoryPanel(i18n, (command) => scene.send(command));
 
 const hud = new Hud({
   i18n,
@@ -49,15 +64,16 @@ const hud = new Hud({
     i18n.setLocale(next);
     saveLocale(storage, next);
     hud.render();
+    inventory.render(true);
   },
   onNewDungeon: () => {
-    world = createWorld(newSeed());
+    // The hero keeps their belongings; only the dungeon is replaced.
+    world = createWorld(newSeed(), characterOf(world));
     scene.setWorld(world);
     showStats(world);
     persist();
   },
   onRespawn: () => scene.send({ type: 'respawn' }),
-  onAttackHeld: (held) => scene.setAttackHeld(held),
 });
 
 showStats(world);

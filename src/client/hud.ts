@@ -12,8 +12,6 @@ export interface HudOptions {
   onLanguageToggle(): void;
   onNewDungeon(): void;
   onRespawn(): void;
-  /** The on-screen attack button was pressed or released. */
-  onAttackHeld(held: boolean): void;
 }
 
 /** The HTML layer above the game canvas. All its text comes from the i18n catalogue. */
@@ -37,17 +35,6 @@ export class Hud {
     element('error-reload').addEventListener('click', () => window.location.reload());
     element('death-respawn').addEventListener('click', options.onRespawn);
 
-    // Touch screens have no mouse buttons or keyboard, so they get an attack button.
-    const attack = element('attack');
-    attack.hidden = !this.isTouch();
-    attack.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      options.onAttackHeld(true);
-    });
-    for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
-      attack.addEventListener(type, () => options.onAttackHeld(false));
-    }
-    attack.addEventListener('contextmenu', (event) => event.preventDefault());
     this.render();
   }
 
@@ -82,6 +69,17 @@ export class Hud {
     this.render();
   }
 
+  /** Adds a line to the short list of recent events (pickups and the like). */
+  log(text: string, warning = false): void {
+    const list = element('log');
+    const line = document.createElement('li');
+    line.textContent = text;
+    if (warning) line.className = 'warning';
+    list.append(line);
+    while (list.children.length > 5) list.firstElementChild?.remove();
+    window.setTimeout(() => line.remove(), 4500);
+  }
+
   toast(key: MessageKey): void {
     const toast = element('toast');
     toast.textContent = this.i18n.t(key);
@@ -106,7 +104,6 @@ export class Hud {
     for (const node of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
       node.textContent = i18n.t(node.dataset.i18n as MessageKey);
     }
-    element('hint').textContent = this.isTouch() ? i18n.t('hud.hintTouch') : i18n.t('hud.hintKeyboard');
     element('language').textContent = i18n.t('hud.language', { language: info?.name ?? i18n.locale });
     const status = element('save-status');
     status.textContent = i18n.t(this.canSave ? 'hud.autosave' : 'hud.autosaveOff');
@@ -114,9 +111,5 @@ export class Hud {
     element('error-body').textContent = i18n.t(this.canSave ? 'error.body' : 'error.bodyNoSave');
     this.setHealth(this.health.current, this.health.max);
     this.setMonsters(this.monsters);
-  }
-
-  private isTouch(): boolean {
-    return window.matchMedia('(pointer: coarse)').matches;
   }
 }

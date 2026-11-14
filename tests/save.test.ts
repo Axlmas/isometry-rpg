@@ -50,6 +50,46 @@ describe('save', () => {
     expect(loaded.world.monsterTotal).toBe(9);
   });
 
+  it('remembers coins, bag, worn equipment and loot on the floor', () => {
+    const world = createWorld(31337);
+    world.player.coins = 123;
+    world.player.inventory = [{ itemId: 'coal', count: 40 }, { itemId: 'ironSword', count: 1 }];
+    world.player.equipment = { weapon: 'soldierBlade', helmet: null, armor: 'chainShirt', boots: null };
+    world.loot = [{ id: 7, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y }, ignored: true }];
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+    expect(loaded.world.player.coins).toBe(123);
+    expect(loaded.world.player.inventory).toEqual(world.player.inventory);
+    expect(loaded.world.player.equipment).toEqual(world.player.equipment);
+    expect(loaded.world.loot).toEqual([{ id: 0, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y }, ignored: false }]);
+  });
+
+  it('rejects saves with impossible belongings', () => {
+    const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
+    const sword = { id: 'ironSword', count: 1 };
+    const cases: Array<Record<string, unknown>> = [
+      { coins: -1 }, { coins: 1.5 }, { coins: '999' },
+      { inventory: 'everything' },
+      { inventory: [{ id: 'godSword', count: 1 }] },
+      { inventory: [{ id: 'ironSword', count: 2 }] }, // equipment does not stack
+      { inventory: [{ id: 'coal', count: 100 }] }, // above the stack limit
+      { inventory: [{ id: 'coal', count: 0 }] },
+      { inventory: [{ id: 'coins', count: 5 }] }, // coins are not carried in the bag
+      { inventory: Array.from({ length: 25 }, () => sword) }, // more than the bag holds
+      { equipment: { weapon: 'ironHelm', helmet: null, armor: null, boots: null } }, // wrong slot
+      { equipment: { weapon: 'coal', helmet: null, armor: null, boots: null } },
+      { equipment: { weapon: null, helmet: null, armor: null, boots: null, cloak: 'ironHelm' } },
+      { equipment: { weapon: null } },
+      { equipment: null },
+      { loot: [{ id: 'coal', count: 1, x: 0, y: 0 }] }, // inside a wall
+      { loot: [{ id: 'coal', count: 1, x: 'a', y: 2 }] },
+      { loot: [{ id: 'nope', count: 1, x: 12, y: 12 }] },
+      { loot: {} },
+    ];
+    for (const change of cases) expect(parseSave(JSON.stringify({ ...good, ...change })).status, JSON.stringify(change)).toBe('damaged');
+  });
+
   it('keeps the hero dead if the game was closed on the defeat screen', () => {
     const world = createWorld(8);
     world.player.hp = 0;
@@ -97,6 +137,7 @@ describe('save', () => {
     for (const old of [
       { version: 1, seed: 1, x: 9, y: 9, tilesWalked: 12 },
       { version: 2, seed: 1, x: 9.4, y: 8.1, distance: 12 },
+      { version: 3, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null },
     ]) {
       const loaded = parseSave(JSON.stringify(old));
       expect(loaded.status).toBe('ok');
@@ -105,6 +146,8 @@ describe('save', () => {
       expect(loaded.world.player.pos).toEqual(fresh.spawn);
       expect(loaded.world.player.hp).toBe(fresh.player.maxHp);
       expect(loaded.world.monsters).toEqual(fresh.monsters);
+      expect(loaded.world.player.equipment).toEqual(fresh.player.equipment);
+      expect(loaded.world.player.inventory).toEqual([]);
     }
   });
 

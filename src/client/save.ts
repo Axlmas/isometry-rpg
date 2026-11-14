@@ -1,7 +1,11 @@
-import { type World, PLAYER_MAX_HP, PLAYER_RADIUS, circleFree, createWorld } from '../sim';
+import {
+  type Character, type EquipSlot, type ItemId, type ItemStack, type World,
+  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
+  characterOf, circleFree, createWorld, isItemId, newCharacter,
+} from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -21,6 +25,11 @@ interface SaveData {
   dead: number[];
   /** State of the combat random generator, so reloading does not re-roll outcomes. */
   rngState: number;
+  coins: number;
+  inventory: Array<{ id: ItemId; count: number }>;
+  equipment: Record<EquipSlot, ItemId | null>;
+  /** Items lying on the floor. */
+  loot: Array<{ id: ItemId; count: number; x: number; y: number }>;
 }
 
 export type LoadResult =
@@ -56,6 +65,10 @@ export function serializeWorld(world: World): string {
     hp: world.player.hp,
     dead,
     rngState: world.rngState,
+    coins: world.player.coins,
+    inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count })),
+    equipment: { ...world.player.equipment },
+    loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, x: loot.pos.x, y: loot.pos.y })),
   };
   return JSON.stringify(data);
 }
@@ -70,11 +83,53 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
   if (current.version === 2) {
     current = { ...current, version: 3, x: null, y: null, hp: PLAYER_MAX_HP, dead: [], rngState: null };
   }
+  // v4 added items: the hero gets the starting weapon and an empty bag.
+  if (current.version === 3) {
+    current = { ...current, version: 4, coins: 0, inventory: [], equipment: newCharacter(STARTING_WEAPON).equipment, loot: [] };
+  }
   return current;
 }
 
 const isInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Checks a saved stack: a known item and a count that item allows. */
+function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
+  if (!isRecord(value) || !isItemId(value.id) || !isInt(value.count) || value.count < 1) return null;
+  const def = ITEMS[value.id];
+  if (def.kind === 'currency' ? !allowCurrency : value.count > (def.kind === 'material' ? def.maxStack : 1)) return null;
+  return { itemId: value.id, count: value.count };
+}
+
+function parseCharacter(data: Record<string, unknown>): Character | null {
+  const { coins, inventory, equipment } = data;
+  if (!isInt(coins) || coins < 0) return null;
+  if (!Array.isArray(inventory) || inventory.length > INVENTORY_SLOTS || !isRecord(equipment)) return null;
+  const stacks: ItemStack[] = [];
+  for (const entry of inventory) {
+    const stack = parseStack(entry, false);
+    if (!stack) return null;
+    stacks.push(stack);
+  }
+  const worn = newCharacter(STARTING_WEAPON).equipment;
+  if (Object.keys(equipment).some((slot) => !EQUIP_SLOTS.includes(slot as EquipSlot))) return null;
+  for (const slot of EQUIP_SLOTS) {
+    const itemId = equipment[slot];
+    if (itemId === null) {
+      worn[slot] = null;
+      continue;
+    }
+    // An item may only be worn in the slot it was made for.
+    if (!isItemId(itemId)) return null;
+    const def = ITEMS[itemId];
+    if (def.kind !== 'equipment' || def.slot !== slot) return null;
+    worn[slot] = itemId;
+  }
+  return { coins, inventory: stacks, equipment: worn };
+}
 
 /** Saved data can be edited or corrupted, so every field is checked. */
 export function parseSave(raw: string | null): LoadResult {
@@ -87,7 +142,9 @@ export function parseSave(raw: string | null): LoadResult {
     if (data.version !== SAVE_VERSION || !isInt(seed) || !isFiniteNumber(distance) || distance < 0) {
       return { status: 'damaged' };
     }
-    const world = createWorld(seed);
+    const character = parseCharacter(data);
+    if (!character) return { status: 'damaged' };
+    const world = createWorld(seed, character);
 
     // `null` is written by migrations and means "use the default".
     if (x !== null || y !== null) {
@@ -107,6 +164,17 @@ export function parseSave(raw: string | null): LoadResult {
     if (rngState !== null) {
       if (!isInt(rngState) || rngState < 0 || rngState > 0xffffffff) return { status: 'damaged' };
       world.rngState = rngState;
+    }
+
+    const { loot } = data;
+    if (!Array.isArray(loot) || loot.length > 500) return { status: 'damaged' };
+    for (const entry of loot) {
+      const stack = parseStack(entry, true);
+      if (!stack || !isRecord(entry) || !isFiniteNumber(entry.x) || !isFiniteNumber(entry.y)) return { status: 'damaged' };
+      const pos = { x: entry.x, y: entry.y };
+      if (!circleFree(world.map, pos, PLAYER_RADIUS)) return { status: 'damaged' };
+      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ignored: false });
+      world.nextLootId += 1;
     }
 
     world.player.distance = distance;
@@ -137,6 +205,9 @@ export function saveWorld(store: KeyValueStore | null, world: World): boolean {
     return false;
   }
 }
+
+/** The hero's belongings, to carry into the next dungeon. */
+export { characterOf };
 
 export function loadLocale(store: KeyValueStore | null): string | null {
   try {

@@ -13,18 +13,34 @@
       <h1 data-i18n="game.title"></h1>
       <div id="health" role="meter" aria-valuemin="0"><div id="health-fill"></div></div>
       <p id="health-text"></p>
+      <p id="hero-stats"></p>
+      <p id="coins"></p>
       <p id="monsters"></p>
-      <p id="hint"></p>
+      <p id="hint" data-i18n="hud.hint"></p>
     </header>
-    <button id="attack" type="button" data-i18n="hud.attack" hidden></button>
     <footer class="panel">
       <div class="actions">
+        <button id="inventory-open" type="button" aria-expanded="false" aria-controls="inventory" data-i18n="inventory.open"></button>
         <button id="new-dungeon" type="button" data-i18n="hud.newDungeon"></button>
         <button id="language" type="button"></button>
       </div>
       <p id="save-status"></p>
     </footer>
   </div>
+
+  <aside id="inventory" class="panel" aria-labelledby="inventory-title" hidden>
+    <div class="panel-head">
+      <h2 id="inventory-title" data-i18n="inventory.title"></h2>
+      <button id="inventory-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <h3 data-i18n="inventory.equipped"></h3>
+    <ul id="equipment-list" class="item-list"></ul>
+    <h3 id="inventory-count"></h3>
+    <p id="inventory-empty" class="item-empty" data-i18n="inventory.empty"></p>
+    <ul id="inventory-list" class="item-list"></ul>
+  </aside>
+
+  <ul id="log" aria-live="polite"></ul>
 
   <dialog id="confirm-new">
     <h2 data-i18n="confirm.newDungeon.title"></h2>

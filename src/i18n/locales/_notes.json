@@ -1,13 +1,16 @@
 {
   "game.title": "Working title of the game. Do not translate until a final name is chosen.",
-  "hud.hintKeyboard": "Shown on devices with a mouse and keyboard. WASD are physical key positions and stay in Latin letters in every language.",
-  "hud.hintTouch": "Shown on phones and tablets instead of hud.hintKeyboard.",
   "hud.language": "Button label. {language} is the language's own name (for example 'Русский') and is not translated.",
   "confirm.newDungeon.yes": "Destructive action button. Keep it short: it sits next to another button on a phone screen.",
   "error.body": "'Last stop' means the last time the hero finished walking; that is when the game saves.",
   "hud.health": "Shown under the health bar and read by screen readers.",
   "hud.monsters": "{count} is the number of living monsters in the dungeon. The =0 form is a short victory message.",
-  "hud.attack": "Label of the round on-screen button on phones. One short word.",
   "death.title": "Heading of the defeat screen. Solemn, not jokey.",
-  "death.respawn": "Button that brings the hero back to life at the dungeon entrance."
+  "death.respawn": "Button that brings the hero back to life at the dungeon entrance.",
+  "hud.hint": "Controls summary. WASD, I and Space are physical keys and stay as they are in every language.",
+  "inventory.stack": "An item name followed by how many there are, for example 'Leather × 3'.",
+  "inventory.better": "Short tag next to a bag item that has higher numbers than the one currently worn.",
+  "grade.d": "Equipment tier. The letter D is part of the game's terminology and is not translated.",
+  "log.picked": "{item} is the item name in its dictionary form (nominative). Phrase the message so that form fits.",
+  "item.leather": "All item.* names: dictionary form, capitalised as a title in English, sentence case in Russian."
 }

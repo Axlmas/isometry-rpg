@@ -1,17 +1,18 @@
 import Phaser from 'phaser';
 import {
-  type Command, type GameEvent, type Monster, type Point, type World,
-  PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
+  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type World,
+  ITEMS, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
   isAlive, isMoving, isWalkable, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
+import { GRADE_COLOR } from './itemText';
 
 const WALL_HEIGHT = 30;
 const HALF_W = TILE_WIDTH / 2;
 const HALF_H = TILE_HEIGHT / 2;
 /** While the pointer is held down, the destination follows it at this interval. */
 const HOLD_REPEAT_MS = 120;
-/** Keyboard and touch attacks aim at the nearest monster within this distance. */
+/** Keyboard attacks aim at the nearest monster within this distance. */
 const AUTO_AIM_RANGE = PLAYER_ATTACK_RANGE + 1;
 const EFFECT_DEPTH = 100000;
 
@@ -24,13 +25,17 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
   KeyD: [1, 0], ArrowRight: [1, 0],
 };
 const ATTACK_KEY = 'Space';
+const INVENTORY_KEY = 'KeyI';
 
 export interface SceneEvents {
-  /** Health or the number of monsters changed. */
+  /** Health, the number of monsters or the hero's belongings changed. */
   onStats(world: World): void;
   /** A good moment to save: the hero stopped, killed a monster or respawned. */
   onCheckpoint(world: World): void;
   onDeath(world: World): void;
+  onPickup(itemId: ItemId, count: number): void;
+  onInventoryFull(): void;
+  onToggleInventory(): void;
   /** Formats a number for the player's language. */
   formatNumber(value: number): string;
 }
@@ -57,10 +62,10 @@ export class DungeonScene extends Phaser.Scene {
   private wasMoving = false;
   private lastStats = '';
   private readonly heldKeys = new Set<string>();
-  private attackHeld = false;
   private holdTimer = 0;
   private mapObjects: Phaser.GameObjects.GameObject[] = [];
   private readonly monsterSprites = new Map<number, MonsterSprite>();
+  private readonly lootSprites = new Map<number, Phaser.GameObjects.Graphics>();
   private hero!: Phaser.GameObjects.Container;
   private weapon!: Phaser.GameObjects.Graphics;
   private marker!: Phaser.GameObjects.Graphics;
@@ -87,9 +92,13 @@ export class DungeonScene extends Phaser.Scene {
 
     // Listening on the window keeps controls working even when a HUD button has focus.
     const onKeyDown = (event: KeyboardEvent) => {
-      const known = event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY;
+      const known = event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY;
       if (!known || event.ctrlKey || event.metaKey || event.altKey) return;
       if (document.querySelector('dialog[open]')) return; // Keys belong to the dialog.
+      if (event.code === INVENTORY_KEY) {
+        if (!event.repeat) this.events_.onToggleInventory();
+        return;
+      }
       if (event.code === ATTACK_KEY && event.target instanceof HTMLButtonElement) return; // Space presses the focused button.
       event.preventDefault(); // Arrow keys and space must not scroll the page.
       if (this.heldKeys.has(event.code)) return;
@@ -129,13 +138,15 @@ export class DungeonScene extends Phaser.Scene {
     this.wasMoving = false;
     this.lastStats = '';
     this.heldKeys.clear();
-    this.attackHeld = false;
     this.marker.setVisible(false);
     for (const object of this.mapObjects) object.destroy();
     this.mapObjects = this.drawMap();
     for (const sprite of this.monsterSprites.values()) sprite.container.destroy();
     this.monsterSprites.clear();
     this.syncMonsters(1);
+    for (const sprite of this.lootSprites.values()) sprite.destroy();
+    this.lootSprites.clear();
+    this.syncLoot();
     this.placeHero(world.player.pos);
     this.hero.setAlpha(isAlive(world) ? 1 : 0.35);
     this.cameras.main.centerOn(this.hero.x, this.hero.y);
@@ -145,11 +156,6 @@ export class DungeonScene extends Phaser.Scene {
   /** Sends a command from outside the scene, for example from a HUD button. */
   send(command: Command): void {
     this.pending.push(command);
-  }
-
-  /** Called while the on-screen attack button is held. */
-  setAttackHeld(held: boolean): void {
-    this.attackHeld = held;
   }
 
   override update(): void {
@@ -184,6 +190,7 @@ export class DungeonScene extends Phaser.Scene {
     });
     this.drawWeapon();
     this.syncMonsters(alpha);
+    this.syncLoot();
   }
 
   // ---------------------------------------------------------------- input
@@ -207,7 +214,7 @@ export class DungeonScene extends Phaser.Scene {
     } else if (pointer.isDown && pointer.leftButtonDown() && this.world.player.attackCooldown === 0) {
       this.orderAttackAt(pointer);
     }
-    if ((this.attackHeld || this.heldKeys.has(ATTACK_KEY)) && this.world.player.attackCooldown === 0) {
+    if (this.heldKeys.has(ATTACK_KEY) && this.world.player.attackCooldown === 0) {
       this.orderAutoAttack();
     }
   }
@@ -236,7 +243,7 @@ export class DungeonScene extends Phaser.Scene {
     this.pending.push({ type: 'attack', dx: world.x - pos.x, dy: world.y - pos.y });
   }
 
-  /** Without a cursor (keyboard, touch) the hero strikes at the nearest monster, or straight ahead. */
+  /** Without a cursor (keyboard) the hero strikes at the nearest monster, or straight ahead. */
   private orderAutoAttack(): void {
     const { pos, facing } = this.world.player;
     let dir = facing;
@@ -284,7 +291,7 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private reportStats(): void {
-    const stats = `${this.world.player.hp}/${this.world.monsters.length}`;
+    const stats = `${this.world.player.hp}/${this.world.monsters.length}/${this.world.player.revision}`;
     if (stats === this.lastStats) return;
     this.lastStats = stats;
     this.events_.onStats(this.world);
@@ -319,6 +326,14 @@ export class DungeonScene extends Phaser.Scene {
       case 'playerRespawned':
         this.setWorld(this.world);
         return true;
+      case 'lootDropped':
+        return false; // Drawn every frame from the world's loot list.
+      case 'itemPicked':
+        this.events_.onPickup(event.itemId, event.count);
+        return true;
+      case 'inventoryFull':
+        this.events_.onInventoryFull();
+        return false;
     }
   }
 
@@ -452,6 +467,42 @@ export class DungeonScene extends Phaser.Scene {
       if (alive.has(id)) continue;
       sprite.container.destroy();
       this.monsterSprites.delete(id);
+    }
+  }
+
+  private createLootSprite(loot: GroundLoot): Phaser.GameObjects.Graphics {
+    const at = tileToScreen(loot.pos.x, loot.pos.y);
+    const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(loot.pos.x + loot.pos.y - 0.2);
+    const def = ITEMS[loot.itemId];
+    g.fillStyle(0x000000, 0.3).fillEllipse(0, 2, 20, 9);
+    if (def.kind === 'currency') {
+      g.fillStyle(0xb8862b).fillEllipse(0, 0, 16, 8);
+      g.fillStyle(0xf2c94c).fillEllipse(0, -3, 16, 8);
+    } else if (def.kind === 'material') {
+      g.fillStyle(0x8a6a45).fillRoundedRect(-7, -12, 14, 13, 4);
+      g.fillStyle(0x5f4830).fillRect(-4, -14, 8, 3);
+    } else {
+      // Equipment glows in the colour of its grade so it stands out from afar.
+      const color = GRADE_COLOR[def.grade];
+      g.fillStyle(color, 0.25).fillCircle(0, -8, 13);
+      g.fillStyle(color).fillPoints([{ x: 0, y: -18 }, { x: 7, y: -8 }, { x: 0, y: 2 }, { x: -7, y: -8 }], true);
+      g.lineStyle(1.5, 0x12141a, 0.9).strokePoints([{ x: 0, y: -18 }, { x: 7, y: -8 }, { x: 0, y: 2 }, { x: -7, y: -8 }], true, true);
+    }
+    // A short hop makes a fresh drop noticeable.
+    this.tweens.add({ targets: g, y: at.y - 10, duration: 140, yoyo: true, ease: 'Quad.easeOut' });
+    return g;
+  }
+
+  private syncLoot(): void {
+    const present = new Set<number>();
+    for (const loot of this.world.loot) {
+      present.add(loot.id);
+      if (!this.lootSprites.has(loot.id)) this.lootSprites.set(loot.id, this.createLootSprite(loot));
+    }
+    for (const [id, sprite] of this.lootSprites) {
+      if (present.has(id)) continue;
+      sprite.destroy();
+      this.lootSprites.delete(id);
     }
   }
 
