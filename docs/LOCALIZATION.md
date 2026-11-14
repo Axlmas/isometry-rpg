@@ -27,8 +27,8 @@
 ## Правила
 
 - **Ключи:** `раздел.имя` в camelCase, например `hud.newDungeon`, `confirm.newDungeon.yes`.
-  Раздел — место в интерфейсе (`hud`, `quick`, `skills`, `inventory`, `shop`, `log`, `confirm`, `toast`, `death`,
-  `error`) или вид данных (`item`, `slot`, `grade`, `skill`, `skillInfo`), не тип элемента.
+  Раздел — место в интерфейсе (`hud`, `quick`, `skills`, `inventory`, `shop`, `log`, `prompt`, `toast`, `death`,
+  `error`) или вид данных (`item`, `slot`, `grade`, `skill`, `skillInfo`, `zone`), не тип элемента.
   Ключ описывает смысл, а не текст.
 - **В коде** ключ всегда пишется строковым литералом: `i18n.t('hud.hint')`,
   `hud.toast('toast.saveDamaged')`, в HTML — `data-i18n="hud.hint"`. Собирать ключ из
@@ -41,7 +41,8 @@
   `{d, date}`), вручную их не форматируем.
 - **Названия предметов, слотов, грейдов и умений.** Правила знают только ID. Ключ по ID
   берётся из таблиц в `src/client/itemText.ts` (`ITEM_NAME`, `SLOT_NAME`, `GRADE_NAME`)
-  и `src/client/skillText.ts` (`SKILL_NAME`, `SKILL_INFO`), где он
+  и `src/client/skillText.ts` (`SKILL_NAME`, `SKILL_INFO`), названия зон —
+  в `src/client/zoneText.ts` (`ZONE_NAME`), где он
   записан целиком: `ironSword: 'item.ironSword'`. Названия предметов — в словарной форме;
   фразы вокруг них строятся так, чтобы эта форма подходила («Подобрано: Железный меч»).
 - **Названия языков** в переключателе (`English`, `Русский`) не переводятся и лежат в
