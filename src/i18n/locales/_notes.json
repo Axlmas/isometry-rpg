@@ -12,5 +12,11 @@
   "inventory.better": "Short tag next to a bag item that has higher numbers than the one currently worn.",
   "grade.d": "Equipment tier. The letter D is part of the game's terminology and is not translated.",
   "log.picked": "{item} is the item name in its dictionary form (nominative). Phrase the message so that form fits.",
-  "item.leather": "All item.* names: dictionary form, capitalised as a title in English, sentence case in Russian."
+  "item.leather": "All item.* names: dictionary form, capitalised as a title in English, sentence case in Russian.",
+  "hud.xp": "Follows the level after a dot on the same line ('Level 3 · experience 40 of 260'), so it starts with a lower-case letter.",
+  "hud.xpMax": "Shown in place of hud.xp at the last level; same position, lower-case start.",
+  "hud.dungeonLevel": "How strong the monsters of the current dungeon are. Followed by the monster count on the same line.",
+  "skills.cooldown": "Shown on a small skill button. {seconds} is whole seconds; 's' is the abbreviation for seconds.",
+  "skills.locked": "Shown on a skill button the hero cannot use yet. Keep it very short.",
+  "skillInfo.heavyBlow": "All skillInfo.* texts are tooltips: one sentence saying what the skill does, no numbers."
 }

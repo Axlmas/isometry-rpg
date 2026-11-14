@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type KeyValueStore, SAVE_VERSION, loadLocale, loadWorld, parseSave, saveLocale, saveWorld, serializeWorld } from '../src/client/save';
-import { createWorld, step } from '../src/sim';
+import { createWorld, newCharacter, step } from '../src/sim';
 
 function memoryStore(): KeyValueStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -63,6 +63,31 @@ describe('save', () => {
     expect(loaded.world.player.inventory).toEqual(world.player.inventory);
     expect(loaded.world.player.equipment).toEqual(world.player.equipment);
     expect(loaded.world.loot).toEqual([{ id: 0, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y }, ignored: false }]);
+  });
+
+  it('remembers level, experience, mana and the dungeon level', () => {
+    const world = createWorld(31337, { ...newCharacter('trainingSword'), level: 5, xp: 77 }, 3);
+    world.player.mp = 11;
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+    expect(loaded.world.player).toMatchObject({ level: 5, xp: 77, mp: 11, maxHp: world.player.maxHp, maxMp: world.player.maxMp });
+    expect(loaded.world.dungeonLevel).toBe(3);
+    expect(loaded.world.monsters[0]?.maxHp).toBe(world.monsters[0]?.maxHp);
+  });
+
+  it('rejects saves with impossible progress', () => {
+    const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
+    const cases: Array<Record<string, unknown>> = [
+      { level: 0 }, { level: 21 }, { level: 2.5 }, { level: '20' },
+      { xp: -1 }, { xp: 50 }, // level 1 needs 50, so 50 would already be level 2
+      { level: 20, xp: 1 },
+      { mp: 41 }, { mp: -1 }, { mp: 1.5 },
+      { dungeonLevel: 0 }, { dungeonLevel: 99 }, { dungeonLevel: null },
+      { level: 20, hp: 9999 },
+    ];
+    for (const change of cases) expect(parseSave(JSON.stringify({ ...good, ...change })).status, JSON.stringify(change)).toBe('damaged');
+    expect(parseSave(JSON.stringify({ ...good, level: 20, xp: 0, hp: 385, mp: 154 })).status).toBe('ok');
   });
 
   it('rejects saves with impossible belongings', () => {
@@ -138,6 +163,8 @@ describe('save', () => {
       { version: 1, seed: 1, x: 9, y: 9, tilesWalked: 12 },
       { version: 2, seed: 1, x: 9.4, y: 8.1, distance: 12 },
       { version: 3, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null },
+      { version: 4, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
+        equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [] },
     ]) {
       const loaded = parseSave(JSON.stringify(old));
       expect(loaded.status).toBe('ok');
@@ -148,6 +175,8 @@ describe('save', () => {
       expect(loaded.world.monsters).toEqual(fresh.monsters);
       expect(loaded.world.player.equipment).toEqual(fresh.player.equipment);
       expect(loaded.world.player.inventory).toEqual([]);
+      expect(loaded.world.player).toMatchObject({ level: 1, xp: 0, mp: fresh.player.maxMp });
+      expect(loaded.world.dungeonLevel).toBe(1);
     }
   });
 

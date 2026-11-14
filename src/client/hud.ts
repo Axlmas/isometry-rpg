@@ -19,7 +19,10 @@ export class Hud {
   private readonly i18n: I18n;
   private canSave: boolean;
   private health = { current: 0, max: 1 };
+  private mana = { current: 0, max: 1 };
+  private progress = { level: 1, xp: 0, needed: 1, dungeonLevel: 1 };
   private monsters = 0;
+  private xpLost = 0;
   private toastTimer: number | undefined;
 
   constructor(options: HudOptions) {
@@ -46,6 +49,33 @@ export class Hud {
     meter.setAttribute('aria-valuetext', this.i18n.t('hud.health', { current, max }));
     element('health-fill').style.inlineSize = `${Math.max(0, Math.min(100, (current / max) * 100))}%`;
     element('health-text').textContent = this.i18n.t('hud.health', { current, max });
+  }
+
+  setMana(current: number, max: number): void {
+    this.mana = { current, max };
+    const meter = element('mana');
+    const text = this.i18n.t('hud.mana', { current, max });
+    meter.setAttribute('aria-valuenow', String(current));
+    meter.setAttribute('aria-valuemax', String(max));
+    meter.setAttribute('aria-valuetext', text);
+    element('mana-fill').style.inlineSize = `${Math.max(0, Math.min(100, (current / max) * 100))}%`;
+    element('mana-text').textContent = text;
+  }
+
+  /** `needed` is zero at the maximum level. */
+  setProgress(level: number, xp: number, needed: number, dungeonLevel: number): void {
+    this.progress = { level, xp, needed, dungeonLevel };
+    const { i18n } = this;
+    element('level').textContent = i18n.t('hud.level', { level });
+    element('xp-text').textContent = needed > 0 ? i18n.t('hud.xp', { current: xp, needed }) : i18n.t('hud.xpMax');
+    element('xp-fill').style.inlineSize = `${needed > 0 ? Math.min(100, (xp / needed) * 100) : 100}%`;
+    element('dungeon-level').textContent = i18n.t('hud.dungeonLevel', { level: dungeonLevel });
+  }
+
+  /** How much experience the last death cost; shown on the defeat screen. */
+  setXpLost(amount: number): void {
+    this.xpLost = amount;
+    element('death-xp').textContent = this.i18n.t('death.xpLost', { count: amount });
   }
 
   setMonsters(count: number): void {
@@ -110,6 +140,9 @@ export class Hud {
     status.classList.toggle('warning', !this.canSave);
     element('error-body').textContent = i18n.t(this.canSave ? 'error.body' : 'error.bodyNoSave');
     this.setHealth(this.health.current, this.health.max);
+    this.setMana(this.mana.current, this.mana.max);
+    this.setProgress(this.progress.level, this.progress.xp, this.progress.needed, this.progress.dungeonLevel);
+    this.setXpLost(this.xpLost);
     this.setMonsters(this.monsters);
   }
 }

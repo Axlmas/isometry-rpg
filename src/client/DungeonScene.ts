@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
 import {
-  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type World,
-  ITEMS, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
+  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type SkillId, type World,
+  ITEMS, PLAYER_ATTACK_ARC, SKILLS, SKILL_IDS, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
   isAlive, isMoving, isWalkable, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
+import { SKILL_KEYS } from './skillText';
 
 const WALL_HEIGHT = 30;
 const HALF_W = TILE_WIDTH / 2;
@@ -26,13 +27,18 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
 };
 const ATTACK_KEY = 'Space';
 const INVENTORY_KEY = 'KeyI';
+const SKILL_BY_KEY = new Map<string, SkillId>(SKILL_IDS.map((id) => [SKILL_KEYS[id].code, id]));
 
 export interface SceneEvents {
   /** Health, the number of monsters or the hero's belongings changed. */
   onStats(world: World): void;
   /** A good moment to save: the hero stopped, killed a monster or respawned. */
   onCheckpoint(world: World): void;
-  onDeath(world: World): void;
+  onDeath(world: World, xpLost: number): void;
+  /** Called after every rule tick, for things that count down (skill cooldowns). */
+  onTick(world: World): void;
+  onLevelUp(level: number, unlocked: SkillId[]): void;
+  onSkillDenied(id: SkillId, reason: 'locked' | 'cooldown' | 'mana'): void;
   onPickup(itemId: ItemId, count: number): void;
   onInventoryFull(): void;
   onToggleInventory(): void;
@@ -92,11 +98,16 @@ export class DungeonScene extends Phaser.Scene {
 
     // Listening on the window keeps controls working even when a HUD button has focus.
     const onKeyDown = (event: KeyboardEvent) => {
-      const known = event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY;
+      const skill = SKILL_BY_KEY.get(event.code);
+      const known = event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY || skill !== undefined;
       if (!known || event.ctrlKey || event.metaKey || event.altKey) return;
       if (document.querySelector('dialog[open]')) return; // Keys belong to the dialog.
       if (event.code === INVENTORY_KEY) {
         if (!event.repeat) this.events_.onToggleInventory();
+        return;
+      }
+      if (skill !== undefined) {
+        if (!event.repeat) this.useSkill(skill, true);
         return;
       }
       if (event.code === ATTACK_KEY && event.target instanceof HTMLButtonElement) return; // Space presses the focused button.
@@ -156,6 +167,22 @@ export class DungeonScene extends Phaser.Scene {
   /** Sends a command from outside the scene, for example from a HUD button. */
   send(command: Command): void {
     this.pending.push(command);
+  }
+
+  /**
+   * Uses a skill. From the keyboard it is aimed at the cursor; from a HUD
+   * button the cursor is on the button, so the hero aims at the nearest monster.
+   */
+  useSkill(id: SkillId, aimAtCursor: boolean): void {
+    const { pos } = this.world.player;
+    let dir: Point;
+    if (aimAtCursor) {
+      const { world } = this.pointerInWorld(this.input.activePointer);
+      dir = { x: world.x - pos.x, y: world.y - pos.y };
+    } else {
+      dir = this.autoAim();
+    }
+    this.pending.push({ type: 'skill', id, dx: dir.x, dy: dir.y });
   }
 
   override update(): void {
@@ -245,6 +272,11 @@ export class DungeonScene extends Phaser.Scene {
 
   /** Without a cursor (keyboard) the hero strikes at the nearest monster, or straight ahead. */
   private orderAutoAttack(): void {
+    const dir = this.autoAim();
+    this.pending.push({ type: 'attack', dx: dir.x, dy: dir.y });
+  }
+
+  private autoAim(): Point {
     const { pos, facing } = this.world.player;
     let dir = facing;
     let best = AUTO_AIM_RANGE;
@@ -255,7 +287,7 @@ export class DungeonScene extends Phaser.Scene {
         dir = { x: monster.pos.x - pos.x, y: monster.pos.y - pos.y };
       }
     }
-    this.pending.push({ type: 'attack', dx: dir.x, dy: dir.y });
+    return dir;
   }
 
   private sendKeyDirection(): void {
@@ -287,11 +319,13 @@ export class DungeonScene extends Phaser.Scene {
     this.wasMoving = moving;
 
     this.reportStats();
+    this.events_.onTick(this.world);
     if (checkpoint) this.events_.onCheckpoint(this.world);
   }
 
   private reportStats(): void {
-    const stats = `${this.world.player.hp}/${this.world.monsters.length}/${this.world.player.revision}`;
+    const { hp, mp, revision } = this.world.player;
+    const stats = `${hp}/${mp}/${this.world.monsters.length}/${revision}`;
     if (stats === this.lastStats) return;
     this.lastStats = stats;
     this.events_.onStats(this.world);
@@ -301,7 +335,25 @@ export class DungeonScene extends Phaser.Scene {
   private showEvent(event: GameEvent): boolean {
     switch (event.type) {
       case 'playerSwing':
-        this.showSwing(event.dir);
+        this.showSwing(event.dir, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, 0xffffff);
+        return false;
+      case 'skillUsed': {
+        const { effect } = SKILLS[event.id];
+        if (effect.kind === 'strike') this.showSwing(event.dir, effect.arc, effect.range, 0xffb347);
+        return false;
+      }
+      case 'playerHealed':
+        this.floatNumber(this.hero.x, this.hero.y - 60, event.amount, '#7fe0a0');
+        this.showRing(0x7fe0a0);
+        return false;
+      case 'xpGained':
+        return false; // The experience bar shows it.
+      case 'levelUp':
+        this.showRing(0xe8c36a);
+        this.events_.onLevelUp(event.level, event.unlocked);
+        return true;
+      case 'skillDenied':
+        this.events_.onSkillDenied(event.id, event.reason);
         return false;
       case 'monsterHit': {
         const at = tileToScreen(event.pos.x, event.pos.y);
@@ -321,7 +373,7 @@ export class DungeonScene extends Phaser.Scene {
       case 'playerDied':
         this.marker.setVisible(false);
         this.hero.setAlpha(0.35);
-        this.events_.onDeath(this.world);
+        this.events_.onDeath(this.world, event.xpLost);
         return true;
       case 'playerRespawned':
         this.setWorld(this.world);
@@ -339,20 +391,29 @@ export class DungeonScene extends Phaser.Scene {
 
   // --------------------------------------------------------------- effects
 
-  private showSwing(dir: Point): void {
+  /** A fading shape on the floor showing where a blow lands. `arc` is its full width in radians. */
+  private showSwing(dir: Point, arc: number, range: number, color: number): void {
     const { pos } = this.world.player;
     const centre = tileToScreen(pos.x, pos.y);
     const angle = Math.atan2(dir.y, dir.x);
-    const points: Point[] = [{ x: 0, y: 0 }];
-    const segments = 10;
+    const full = arc >= Math.PI * 2;
+    const points: Point[] = full ? [] : [{ x: 0, y: 0 }];
+    const segments = full ? 28 : 10;
     for (let i = 0; i <= segments; i++) {
-      const a = angle - PLAYER_ATTACK_ARC / 2 + (PLAYER_ATTACK_ARC * i) / segments;
-      const edge = tileToScreen(pos.x + Math.cos(a) * PLAYER_ATTACK_RANGE, pos.y + Math.sin(a) * PLAYER_ATTACK_RANGE);
+      const a = angle - arc / 2 + (arc * i) / segments;
+      const edge = tileToScreen(pos.x + Math.cos(a) * range, pos.y + Math.sin(a) * range);
       points.push({ x: edge.x - centre.x, y: edge.y - centre.y });
     }
-    const arc = this.add.graphics({ x: centre.x, y: centre.y }).setDepth(-400);
-    arc.fillStyle(0xffffff, 0.35).fillPoints(points, true);
-    this.tweens.add({ targets: arc, alpha: 0, duration: 180, onComplete: () => arc.destroy() });
+    const shape = this.add.graphics({ x: centre.x, y: centre.y }).setDepth(-400);
+    shape.fillStyle(color, 0.4).fillPoints(points, true);
+    this.tweens.add({ targets: shape, alpha: 0, duration: 220, onComplete: () => shape.destroy() });
+  }
+
+  /** A ring that grows out from the hero: healing, a new level. */
+  private showRing(color: number): void {
+    const ring = this.add.graphics({ x: this.hero.x, y: this.hero.y }).setDepth(-300);
+    ring.lineStyle(4, color, 0.9).strokeEllipse(0, 0, 40, 20);
+    this.tweens.add({ targets: ring, scale: 3, alpha: 0, duration: 500, ease: 'Quad.easeOut', onComplete: () => ring.destroy() });
   }
 
   private floatNumber(x: number, y: number, value: number, color: string): void {

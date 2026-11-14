@@ -14,18 +14,26 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #12141a; col
   justify-content: space-between; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); }
 #hud > * { pointer-events: auto; }
 .panel { background: var(--panel); border: 1px solid #2a2d36; border-radius: 10px; padding: 10px 14px;
-  max-width: min(100%, 520px); box-sizing: border-box; }
+  max-width: min(100%, 400px); box-sizing: border-box; }
 h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.04em; }
 p { margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
 #hint, #save-status { color: var(--muted); font-size: 14px; }
 #health { block-size: 10px; background: #2a2d36; border-radius: 5px; overflow: hidden; margin-block: 6px 4px; min-inline-size: 180px; }
 #health-fill { block-size: 100%; background: #d9534f; transition: inline-size 120ms linear; }
-#health-text, #monsters, #hero-stats, #coins { font-size: 15px; margin-block: 2px; }
+#hud header p { font-size: 15px; margin-block: 2px; }
+.bar { block-size: 6px; background: #2a2d36; border-radius: 3px; overflow: hidden; margin-block: 6px 4px; }
+.bar > div { block-size: 100%; transition: inline-size 120ms linear; }
+#mana-fill { background: #4f8fe0; }
+#xp-fill { background: var(--accent); }
+#death-xp { margin-block-start: 8px; color: var(--warning); }
 #coins { color: #f2c94c; }
 #monsters.cleared { color: var(--accent); }
 #hud > header { margin-block-end: auto; }
 #save-status.warning { color: var(--warning); }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 8px; }
+details { margin-block-end: 4px; }
+summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button { font: inherit; color: var(--ink); background: #2a2d36; border: 1px solid #454956; border-radius: 8px;
   padding: 10px 14px; min-height: 44px; cursor: pointer; text-align: start; }
 button:hover { background: #343844; }
@@ -45,7 +53,7 @@ dialog form { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 16px
 [hidden] { display: none !important; }
 
 /* Inventory */
-#inventory { position: fixed; inset-block: 12px; inset-inline-end: 12px; inline-size: min(420px, calc(100vw - 24px));
+#inventory { position: fixed; inset-block: 12px 84px; inset-inline-end: 12px; inline-size: min(420px, calc(100vw - 24px));
   max-width: none; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #inventory h2 { margin: 0; font-size: 18px; }
@@ -59,7 +67,18 @@ dialog form { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 16px
 .item-empty { flex: 1; }
 .item-better { color: #7fd1b9; font-size: 12px; }
 button.small { min-height: 32px; padding: 4px 10px; font-size: 13px; }
-#log { position: fixed; inset-inline-end: 12px; inset-block-end: 12px; margin: 0; padding: 0; list-style: none; display: flex;
+#log { position: fixed; inset-inline-end: 12px; inset-block-end: 84px; margin: 0; padding: 0; list-style: none; display: flex;
   flex-direction: column; gap: 4px; align-items: flex-end; pointer-events: none; max-inline-size: min(420px, 60vw); }
 #log li { background: var(--panel); border: 1px solid #2a2d36; border-radius: 8px; padding: 6px 10px; font-size: 14px; overflow-wrap: anywhere; }
 #log li.warning { border-color: var(--warning); color: var(--warning); }
+
+/* Skills */
+#skills { position: fixed; inset-block-end: 12px; inset-inline: 0; margin-inline: auto; inline-size: fit-content; display: flex; gap: 8px; }
+.skill { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; min-inline-size: 150px;
+  background: var(--panel); text-align: start; padding: 8px 12px; }
+.skill kbd { grid-row: span 2; font: inherit; font-weight: 700; inline-size: 30px; block-size: 30px; display: grid; place-items: center;
+  border: 1px solid #454956; border-radius: 6px; background: #12141a; }
+.skill-name { font-weight: 600; font-size: 14px; }
+.skill-state { font-size: 12px; color: var(--muted); }
+.skill.locked, .skill.unavailable { opacity: 0.55; }
+.skill.no-mana .skill-state { color: #6fa8f0; }

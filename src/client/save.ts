@@ -1,11 +1,11 @@
 import {
   type Character, type EquipSlot, type ItemId, type ItemStack, type World,
-  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
-  characterOf, circleFree, createWorld, isItemId, newCharacter,
+  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
+  characterOf, circleFree, createWorld, isItemId, newCharacter, xpToNextLevel,
 } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -25,6 +25,12 @@ interface SaveData {
   dead: number[];
   /** State of the combat random generator, so reloading does not re-roll outcomes. */
   rngState: number;
+  level: number;
+  /** Experience gained towards the next level. */
+  xp: number;
+  mp: number;
+  /** Strength of this dungeon's monsters. */
+  dungeonLevel: number;
   coins: number;
   inventory: Array<{ id: ItemId; count: number }>;
   equipment: Record<EquipSlot, ItemId | null>;
@@ -65,6 +71,10 @@ export function serializeWorld(world: World): string {
     hp: world.player.hp,
     dead,
     rngState: world.rngState,
+    level: world.player.level,
+    xp: world.player.xp,
+    mp: world.player.mp,
+    dungeonLevel: world.dungeonLevel,
     coins: world.player.coins,
     inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count })),
     equipment: { ...world.player.equipment },
@@ -87,6 +97,8 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
   if (current.version === 3) {
     current = { ...current, version: 4, coins: 0, inventory: [], equipment: newCharacter(STARTING_WEAPON).equipment, loot: [] };
   }
+  // v5 added levels and mana: everyone starts at level 1 with full mana (null).
+  if (current.version === 4) current = { ...current, version: 5, level: 1, xp: 0, mp: null, dungeonLevel: 1 };
   return current;
 }
 
@@ -105,7 +117,10 @@ function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
 }
 
 function parseCharacter(data: Record<string, unknown>): Character | null {
-  const { coins, inventory, equipment } = data;
+  const { level, xp, coins, inventory, equipment } = data;
+  if (!isInt(level) || level < 1 || level > MAX_LEVEL) return null;
+  // Experience at or above the next level's threshold cannot come from normal play.
+  if (!isInt(xp) || xp < 0 || (level < MAX_LEVEL ? xp >= xpToNextLevel(level) : xp !== 0)) return null;
   if (!isInt(coins) || coins < 0) return null;
   if (!Array.isArray(inventory) || inventory.length > INVENTORY_SLOTS || !isRecord(equipment)) return null;
   const stacks: ItemStack[] = [];
@@ -128,7 +143,7 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
     if (def.kind !== 'equipment' || def.slot !== slot) return null;
     worn[slot] = itemId;
   }
-  return { coins, inventory: stacks, equipment: worn };
+  return { level, xp, coins, inventory: stacks, equipment: worn };
 }
 
 /** Saved data can be edited or corrupted, so every field is checked. */
@@ -144,7 +159,13 @@ export function parseSave(raw: string | null): LoadResult {
     }
     const character = parseCharacter(data);
     if (!character) return { status: 'damaged' };
-    const world = createWorld(seed, character);
+    const { dungeonLevel, mp } = data;
+    if (!isInt(dungeonLevel) || dungeonLevel < 1 || dungeonLevel > MAX_LEVEL) return { status: 'damaged' };
+    const world = createWorld(seed, character, dungeonLevel);
+    if (mp !== null) {
+      if (!isInt(mp) || mp < 0 || mp > world.player.maxMp) return { status: 'damaged' };
+      world.player.mp = mp;
+    }
 
     // `null` is written by migrations and means "use the default".
     if (x !== null || y !== null) {

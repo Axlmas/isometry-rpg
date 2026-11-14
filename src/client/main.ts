@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
-import { type World, createWorld, isAlive } from '../sim';
+import { type World, MAX_LEVEL, SKILLS, createWorld, isAlive, xpToNextLevel } from '../sim';
 import { InventoryPanel } from './inventoryPanel';
 import { ITEM_NAME } from './itemText';
 import { DungeonScene } from './DungeonScene';
 import { Hud } from './hud';
 import { characterOf, loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
+import { SkillBar } from './skillBar';
+import { SKILL_NAME } from './skillText';
 import './style.css';
 
 const storage = openStorage();
@@ -31,6 +33,9 @@ function persist(): void {
 
 function showStats(w: World): void {
   hud.setHealth(w.player.hp, w.player.maxHp);
+  hud.setMana(w.player.mp, w.player.maxMp);
+  hud.setProgress(w.player.level, w.player.xp, w.player.level < MAX_LEVEL ? xpToNextLevel(w.player.level) : 0, w.dungeonLevel);
+  skillBar.update(w);
   hud.setMonsters(w.monsters.length);
   hud.setDeathVisible(!isAlive(w));
   inventory.update(w);
@@ -39,7 +44,20 @@ function showStats(w: World): void {
 const scene = new DungeonScene(world, {
   onStats: showStats,
   onCheckpoint: persist,
-  onDeath: showStats,
+  onDeath: (w, xpLost) => {
+    hud.setXpLost(xpLost);
+    showStats(w);
+  },
+  onTick: (w) => skillBar.update(w),
+  onLevelUp: (level, unlocked) => {
+    hud.log(i18n.t('log.levelUp', { level }));
+    for (const id of unlocked) hud.log(i18n.t('log.skillUnlocked', { skill: i18n.t(SKILL_NAME[id]) }));
+  },
+  onSkillDenied: (id, reason) => {
+    if (reason === 'mana') hud.log(i18n.t('log.noMana'), true);
+    else if (reason === 'cooldown') hud.log(i18n.t('log.skillCooling'), true);
+    else hud.log(i18n.t('log.skillLocked', { level: SKILLS[id].unlockLevel }), true);
+  },
   onPickup: (itemId, count) => {
     if (itemId === 'coins') {
       hud.log(i18n.t('log.coins', { count }));
@@ -54,6 +72,7 @@ const scene = new DungeonScene(world, {
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
 });
 
+const skillBar = new SkillBar(i18n, (id) => scene.useSkill(id, false));
 const inventory = new InventoryPanel(i18n, (command) => scene.send(command));
 
 const hud = new Hud({
@@ -65,6 +84,7 @@ const hud = new Hud({
     saveLocale(storage, next);
     hud.render();
     inventory.render(true);
+    skillBar.update();
   },
   onNewDungeon: () => {
     // The hero keeps their belongings; only the dungeon is replaced.
