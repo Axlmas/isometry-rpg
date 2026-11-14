@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   type Monster, type World, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_WINDUP, MONSTER_COUNT, MONSTER_DAMAGE,
   MONSTER_MAX_HP, MONSTER_MIN_SPAWN_DISTANCE, MONSTER_RADIUS, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_WINDUP,
-  PLAYER_DAMAGE, PLAYER_MAX_HP, PLAYER_REGEN_DELAY, circleFree, createWorld, isAlive, isWalkable, step,
+  PLAYER_MAX_HP, PLAYER_REGEN_DELAY, circleFree, createWorld, isAlive, isWalkable, step,
 } from '../src/sim';
+
+// The damage of the weapon every hero starts with.
+const PLAYER_DAMAGE = [9, 14] as const;
 
 /** A world with exactly the given monsters, placed relative to the hero. */
 function arena(offsets: Array<[number, number]>, seed = 5): World {

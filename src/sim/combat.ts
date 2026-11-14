@@ -1,10 +1,15 @@
 import {
   MONSTER_AGGRO_RANGE, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
-  MONSTER_SPEED, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_DAMAGE, PLAYER_RADIUS, TICK_MS,
+  MONSTER_SPEED, MIN_DAMAGE_TAKEN, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_RADIUS, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
+import { dropLoot, playerDamage, playerDefense } from './inventory';
+import {
+  DROP_COINS, DROP_D_EQUIPMENT_CHANCE, DROP_MATERIAL_CHANCE, DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE,
+  MATERIAL_IDS, droppableEquipment,
+} from './items';
 import { findPath } from './pathfinding';
 import { createRng } from './rng';
 import type { Monster, World } from './world';
@@ -15,6 +20,25 @@ function roll(world: World, [min, max]: readonly [number, number]): number {
   const value = rng.int(min, max);
   world.rngState = rng.state;
   return value;
+}
+
+function pick<T>(world: World, options: readonly T[]): T {
+  return options[roll(world, [0, options.length - 1])] as T;
+}
+
+/** Rolls what a dead monster leaves behind and puts it on the floor. */
+function dropMonsterLoot(world: World, at: Point): void {
+  dropLoot(world, 'coins', roll(world, DROP_COINS), at);
+  // Placed slightly apart so both drops are visible.
+  const beside = { x: at.x + 0.35, y: at.y + 0.1 };
+  const chance = roll(world, [1, 100]);
+  if (chance <= DROP_MATERIAL_CHANCE) {
+    dropLoot(world, pick(world, MATERIAL_IDS), roll(world, DROP_MATERIAL_COUNT), beside);
+  } else if (chance <= DROP_MATERIAL_CHANCE + DROP_PLAIN_EQUIPMENT_CHANCE) {
+    dropLoot(world, pick(world, droppableEquipment('none')), 1, beside);
+  } else if (chance <= DROP_MATERIAL_CHANCE + DROP_PLAIN_EQUIPMENT_CHANCE + DROP_D_EQUIPMENT_CHANCE) {
+    dropLoot(world, pick(world, droppableEquipment('d')), 1, beside);
+  }
 }
 
 /** Lands the hero's blow: damages every monster inside the swing. */
@@ -34,7 +58,7 @@ export function resolvePlayerAttack(world: World, dir: Point): void {
     // No hitting through walls.
     if (!clearLine(map, player.pos, monster.pos, 0.05)) continue;
 
-    const damage = roll(world, PLAYER_DAMAGE);
+    const damage = roll(world, playerDamage(player));
     monster.hp = Math.max(0, monster.hp - damage);
     monster.aggro = true;
     monster.windup = 0; // A hit interrupts the monster's own attack.
@@ -46,13 +70,16 @@ export function resolvePlayerAttack(world: World, dir: Point): void {
       );
     }
     world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
+    if (monster.hp === 0) dropMonsterLoot(world, monster.pos);
   }
   world.monsters = world.monsters.filter((monster) => monster.hp > 0);
 }
 
-function hurtPlayer(world: World, damage: number): void {
+/** Applies a monster's blow to the hero; armour absorbs part of it. */
+function hurtPlayer(world: World, rawDamage: number): void {
   const { player } = world;
   if (player.hp <= 0) return;
+  const damage = Math.max(MIN_DAMAGE_TAKEN, rawDamage - playerDefense(player));
   player.hp = Math.max(0, player.hp - damage);
   player.ticksSinceHurt = 0;
   world.events.push({ type: 'playerHit', damage });

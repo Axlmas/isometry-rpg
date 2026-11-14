@@ -5,6 +5,7 @@ import {
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
+import { dropFromInventory, equipFromInventory, pickUpLoot, unequip } from './inventory';
 import { findPath } from './pathfinding';
 import type { Command, World } from './world';
 
@@ -86,6 +87,15 @@ function applyCommand(world: World, command: Command): void {
       world.events.push({ type: 'playerSwing', dir });
       return;
     }
+    case 'equip':
+      equipFromInventory(world, command.index);
+      return;
+    case 'unequip':
+      unequip(world, command.slot);
+      return;
+    case 'drop':
+      dropFromInventory(world, command.index);
+      return;
   }
 }
 
@@ -151,6 +161,7 @@ export function step(world: World, commands: readonly Command[] = []): void {
   }
 
   updateMonsters(world);
+  if (player.hp > 0) pickUpLoot(world);
 
   if (player.hp > 0) {
     player.ticksSinceHurt += 1;

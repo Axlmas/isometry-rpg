@@ -16,7 +16,14 @@ export const PLAYER_SPEED = 4.5;
 /** Collision radius. Must stay below 0.5. */
 export const PLAYER_RADIUS = 0.3;
 export const PLAYER_MAX_HP = 100;
-export const PLAYER_DAMAGE: readonly [number, number] = [9, 14];
+/** Damage without a weapon. Weapon damage is in items.ts. */
+export const UNARMED_DAMAGE: readonly [number, number] = [3, 5];
+/** How many different stacks the hero can carry. */
+export const INVENTORY_SLOTS = 24;
+/** The hero picks up loot lying this close. */
+export const LOOT_PICKUP_RADIUS = 0.7;
+/** However good the armour, a blow that lands always hurts at least this much. */
+export const MIN_DAMAGE_TAKEN = 1;
 /** How far the weapon reaches from the hero's centre. */
 export const PLAYER_ATTACK_RANGE = 1.35;
 /** Full width of the swing, in radians. */

@@ -2,6 +2,8 @@ import {
   MONSTER_COUNT, MONSTER_MAX_HP, MONSTER_MIN_SPAWN_DISTANCE, PILLAR_CHANCE, PLAYER_MAX_HP, ROOM_SIZE,
 } from './balance';
 import { type GridMap, type Point, type Tile, TILE_FLOOR, TILE_WALL, isWalkable } from './grid';
+import { type Character, type ItemStack, newCharacter } from './inventory';
+import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
 import { createRng } from './rng';
 
 export interface Player {
@@ -24,6 +26,22 @@ export interface Player {
   pendingAttack: { dir: Point; ticks: number } | null;
   /** Ticks since the hero last took damage; drives health regeneration. */
   ticksSinceHurt: number;
+  coins: number;
+  /** At most INVENTORY_SLOTS stacks. */
+  inventory: ItemStack[];
+  equipment: Record<EquipSlot, ItemId | null>;
+  /** Goes up whenever coins, inventory or equipment change, so the client knows when to redraw them. */
+  revision: number;
+}
+
+/** An item lying on the floor. */
+export interface GroundLoot {
+  id: number;
+  itemId: ItemId;
+  count: number;
+  pos: Point;
+  /** True while the hero should not pick it up: just dropped, or no room for it. */
+  ignored: boolean;
 }
 
 /** Monster kinds are stable IDs: saves and rules use them, the client maps them to art and names. */
@@ -57,7 +75,10 @@ export type GameEvent =
   | { type: 'monsterWindup'; id: number }
   | { type: 'playerHit'; damage: number }
   | { type: 'playerDied' }
-  | { type: 'playerRespawned' };
+  | { type: 'playerRespawned' }
+  | { type: 'lootDropped'; id: number }
+  | { type: 'itemPicked'; itemId: ItemId; count: number }
+  | { type: 'inventoryFull' };
 
 export interface World {
   seed: number;
@@ -71,6 +92,9 @@ export interface World {
   monsters: Monster[];
   /** How many monsters this dungeon started with. */
   monsterTotal: number;
+  /** Items on the floor, ordered by id. */
+  loot: GroundLoot[];
+  nextLootId: number;
   /** Replaced on every tick. */
   events: GameEvent[];
 }
@@ -83,9 +107,19 @@ export type Command =
   /** Strike in a direction. Ignored while the previous attack is cooling down. */
   | { type: 'attack'; dx: number; dy: number }
   /** Return to the entrance with full health. Only works when the hero is dead. */
-  | { type: 'respawn' };
+  | { type: 'respawn' }
+  /** Wear the item in an inventory slot. */
+  | { type: 'equip'; index: number }
+  /** Move a worn item back to the inventory. */
+  | { type: 'unequip'; slot: EquipSlot }
+  /** Drop an inventory slot on the floor. */
+  | { type: 'drop'; index: number };
 
-export function createWorld(seed: number): World {
+/**
+ * Builds a dungeon from a seed. Pass the hero's belongings to carry them over
+ * from the previous dungeon; without them a new hero is created.
+ */
+export function createWorld(seed: number, character: Character = newCharacter(STARTING_WEAPON)): World {
   const rng = createRng(seed >>> 0);
   const width = ROOM_SIZE;
   const height = ROOM_SIZE;
@@ -166,9 +200,15 @@ export function createWorld(seed: number): World {
       attackCooldown: 0,
       pendingAttack: null,
       ticksSinceHurt: 0,
+      coins: character.coins,
+      inventory: character.inventory.map((stack) => ({ ...stack })),
+      equipment: { ...character.equipment },
+      revision: 0,
     },
     monsters,
     monsterTotal: monsters.length,
+    loot: [],
+    nextLootId: 0,
     events: [],
   };
 }
