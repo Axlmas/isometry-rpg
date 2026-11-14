@@ -1,0 +1,18 @@
+{
+  "game.title": "Isometry RPG",
+  "hud.hint": "Tap or click the floor to move.",
+  "hud.steps": "{count, plural, =0 {No steps taken yet} one {# step taken} other {# steps taken}}",
+  "hud.newDungeon": "New dungeon",
+  "hud.language": "Language: {language}",
+  "hud.autosave": "Progress is saved automatically on this device.",
+  "hud.autosaveOff": "This browser does not allow saving. Progress will be lost when you close the page.",
+  "confirm.newDungeon.title": "Start a new dungeon?",
+  "confirm.newDungeon.body": "Your current dungeon and step count will be replaced. This cannot be undone.",
+  "confirm.newDungeon.yes": "Start new dungeon",
+  "confirm.newDungeon.no": "Keep playing",
+  "toast.saveDamaged": "Your saved game could not be read, so a new dungeon was started.",
+  "error.title": "Something went wrong",
+  "error.body": "The game has stopped. Your progress up to your last stop is safe. Reload the page to continue.",
+  "error.bodyNoSave": "The game has stopped. Reload the page to start again.",
+  "error.reload": "Reload"
+}

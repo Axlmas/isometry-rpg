@@ -1,0 +1,8 @@
+{
+  "game.title": "Working title of the game. Do not translate until a final name is chosen.",
+  "hud.hint": "Shown at the top of the screen. Must cover both touch and mouse.",
+  "hud.steps": "{count} is the number of tiles the hero has walked. Needs every plural form of the target language.",
+  "hud.language": "Button label. {language} is the language's own name (for example 'Русский') and is not translated.",
+  "confirm.newDungeon.yes": "Destructive action button. Keep it short: it sits next to another button on a phone screen.",
+  "error.body": "'Last stop' means the last time the hero finished walking; that is when the game saves."
+}
