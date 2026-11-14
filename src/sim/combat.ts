@@ -1,7 +1,7 @@
 import {
   MONSTER_AGGRO_RANGE, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
-  MONSTER_SPEED, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
+  MONSTER_KINDS, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
@@ -79,7 +79,7 @@ export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
     world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
     if (monster.hp === 0) {
       dropMonsterLoot(world, monster.pos);
-      xp += monsterXp(world.dungeonLevel);
+      xp += monsterXp(world.dungeonLevel, monster.kind);
     }
   }
   world.monsters = world.monsters.filter((monster) => monster.hp > 0);
@@ -123,7 +123,7 @@ function chase(world: World, monster: Monster, distance: number): void {
   const toTarget = Math.hypot(dx, dy);
   // Stop just short of the hero instead of walking into them.
   const stopAt = target === player.pos ? MONSTER_ATTACK_START * 0.85 : 0;
-  const move = Math.min((MONSTER_SPEED * TICK_MS) / 1000, Math.max(0, (target === player.pos ? distance : toTarget) - stopAt));
+  const move = Math.min((MONSTER_KINDS[monster.kind].speed * TICK_MS) / 1000, Math.max(0, (target === player.pos ? distance : toTarget) - stopAt));
   if (toTarget === 0 || move <= 0) {
     if (target !== player.pos) monster.waypoint = null;
     return;
@@ -186,7 +186,7 @@ export function updateMonsters(world: World): void {
       monster.windup -= 1;
       if (monster.windup === 0) {
         monster.cooldown = MONSTER_ATTACK_COOLDOWN;
-        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(world.dungeonLevel)));
+        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(world.dungeonLevel, monster.kind)));
       }
     } else if (distance <= MONSTER_ATTACK_START && monster.cooldown === 0) {
       monster.windup = MONSTER_ATTACK_WINDUP;

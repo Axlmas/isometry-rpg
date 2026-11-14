@@ -7,8 +7,15 @@
 export const TICK_MS = 50;
 const ticks = (seconds: number): number => Math.round((seconds * 1000) / TICK_MS);
 
-export const ROOM_SIZE = 24;
+// Zones
+export const DUNGEON_SIZE = 24;
+/** Share of dungeon tiles that are pillars. */
 export const PILLAR_CHANCE = 0.1;
+export const FIELD_SIZE = 34;
+/** Share of field tiles taken by trees and rocks. */
+export const FIELD_TREE_CHANCE = 0.07;
+/** The hero can use an exit while standing this close to it. */
+export const EXIT_RANGE = 1.6;
 
 // Hero
 /** Tiles per second. */
@@ -54,6 +61,17 @@ export const PLAYER_REGEN_DELAY = ticks(5);
 export const PLAYER_REGEN_INTERVAL = ticks(0.25);
 
 // Monsters
+/** Kind IDs are stable: saves and rules use them, the client maps them to art. */
+export type MonsterKind = 'grunt' | 'wolf';
+/**
+ * How each kind differs from the baseline numbers below: multipliers for
+ * health, damage and experience, and its own speed in tiles per second.
+ */
+export const MONSTER_KINDS: Readonly<Record<MonsterKind, { hp: number; damage: number; xp: number; speed: number }>> = {
+  grunt: { hp: 1, damage: 1, xp: 1, speed: 2.6 },
+  // Field beasts are weaker but quicker: a warm-up before the dungeon.
+  wolf: { hp: 0.6, damage: 0.7, xp: 0.5, speed: 3.3 },
+};
 export const MONSTER_COUNT = 9;
 /** Monsters are never placed closer than this to the hero's starting point. */
 export const MONSTER_MIN_SPAWN_DISTANCE = 6;
@@ -65,7 +83,6 @@ export const MONSTER_XP = 12;
 export const MONSTER_HP_PER_LEVEL = 0.3;
 export const MONSTER_DAMAGE_PER_LEVEL = 0.22;
 export const MONSTER_XP_PER_LEVEL = 0.3;
-export const MONSTER_SPEED = 2.6;
 export const MONSTER_DAMAGE: readonly [number, number] = [5, 9];
 /** A monster notices the hero within this distance. */
 export const MONSTER_AGGRO_RANGE = 5.5;

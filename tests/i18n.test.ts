@@ -4,7 +4,7 @@ import en from '../src/i18n/locales/en.json';
 import { pseudolocalize } from '../src/i18n/pseudo';
 
 const KEYS = Object.keys(en) as MessageKey[];
-const SAMPLE = { count: 3, language: 'English', current: 40, max: 100, min: 1, defense: 2, used: 3, total: 24, value: 2, item: 'Coal', level: 3, needed: 260, cost: 8, seconds: 4, skill: 'Sweep', amount: 60, price: 25, gain: 12 };
+const SAMPLE = { count: 3, language: 'English', current: 40, max: 100, min: 1, defense: 2, used: 3, total: 24, value: 2, item: 'Coal', level: 3, needed: 260, cost: 8, seconds: 4, skill: 'Sweep', amount: 60, price: 25, gain: 12, zone: 'Stillford' };
 
 describe('I18n', () => {
   it('formats every message in every locale without problems', () => {
@@ -21,7 +21,7 @@ describe('I18n', () => {
   it('applies the plural rules of each language', () => {
     const i18n = new I18n();
     i18n.setLocale('ru');
-    expect(i18n.t('hud.monsters', { count: 0 })).toMatch(/^Подземелье зачищено/);
+    expect(i18n.t('hud.monsters', { count: 0 })).toBe('Монстров здесь не осталось');
     expect(i18n.t('hud.monsters', { count: 1 })).toBe('Остался 1 монстр');
     expect(i18n.t('hud.monsters', { count: 3 })).toBe('Осталось 3 монстра');
     expect(i18n.t('hud.monsters', { count: 5 })).toBe('Осталось 5 монстров');
@@ -43,7 +43,7 @@ describe('I18n', () => {
     });
     i18n.setLocale('xx');
     expect(i18n.t('hud.hint')).toBe(en['hud.hint']);
-    expect(i18n.t('hud.newDungeon')).toBe(en['hud.newDungeon']);
+    expect(i18n.t('inventory.close')).toBe(en['inventory.close']);
     expect(problems).toHaveLength(2);
   });
 

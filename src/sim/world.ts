@@ -1,12 +1,11 @@
-import {
-  MAX_LEVEL, MONSTER_COUNT, MONSTER_MIN_SPAWN_DISTANCE, PILLAR_CHANCE, ROOM_SIZE,
-} from './balance';
-import { type GridMap, type Point, type Tile, TILE_FLOOR, TILE_WALL, isWalkable } from './grid';
+import { MAX_LEVEL, MONSTER_COUNT, MONSTER_MIN_SPAWN_DISTANCE, type MonsterKind } from './balance';
+import { type GridMap, type Point, isWalkable } from './grid';
 import { type Character, type ItemStack, newCharacter } from './inventory';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
 import { maxHpAtLevel, maxMpAtLevel, monsterMaxHp } from './progression';
 import { createRng } from './rng';
 import type { SkillId } from './skills';
+import { type ZoneExit, type ZoneKind, buildZone } from './zones';
 
 /** A blow on its way: its direction, shape and strength. */
 export interface PendingAttack {
@@ -71,9 +70,6 @@ export interface GroundLoot {
   ignored: boolean;
 }
 
-/** Monster kinds are stable IDs: saves and rules use them, the client maps them to art and names. */
-export type MonsterKind = 'grunt';
-
 export interface Monster {
   /** Stable within a dungeon: the same seed always gives the same monsters. */
   id: number;
@@ -117,7 +113,9 @@ export type GameEvent =
   | { type: 'playerRespawned' }
   | { type: 'lootDropped'; id: number }
   | { type: 'itemPicked'; itemId: ItemId; count: number }
-  | { type: 'inventoryFull' };
+  | { type: 'inventoryFull' }
+  /** The hero asked to leave through an exit; the client builds the next zone. */
+  | { type: 'travel'; to: ZoneKind };
 
 export interface World {
   seed: number;
@@ -125,15 +123,17 @@ export interface World {
   /** State of the random generator used for combat rolls. */
   rngState: number;
   map: GridMap;
+  zone: ZoneKind;
   spawn: Point;
-  /** Where the merchant stands; always next to the entrance. Monsters ignore him. */
-  merchant: Point;
+  /** Where the merchant stands, if this zone has one. Monsters ignore him. */
+  merchant: Point | null;
+  exits: ZoneExit[];
   player: Player;
   /** Living monsters, ordered by id. */
   monsters: Monster[];
-  /** How many monsters this dungeon started with. */
+  /** How many monsters this zone started with. */
   monsterTotal: number;
-  /** Sets how strong this dungeon's monsters are and how much experience they give. */
+  /** Level of the zone: sets how strong its monsters are and how much experience they give. */
   dungeonLevel: number;
   /** Items on the floor, ordered by id. */
   loot: GroundLoot[];
@@ -165,72 +165,54 @@ export type Command =
   | { type: 'toggleCharges' }
   /** Trade with the merchant; only works next to him. */
   | { type: 'buy'; itemId: ItemId; count: number }
-  | { type: 'sell'; index: number; count: number };
+  | { type: 'sell'; index: number; count: number }
+  /** Leave through the exit the hero is standing at. */
+  | { type: 'travel' };
+
+/** A carried-over amount, forced into [min, max]; anything missing or not a number becomes the maximum. */
+function carried(value: number | undefined, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return max;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
 
 /**
- * Builds a dungeon from a seed. Pass the hero's belongings to carry them over
- * from the previous dungeon; without them a new hero is created. The dungeon
- * is as strong as the hero entering it unless a level is given.
+ * Builds a zone from a seed. Pass the hero's belongings to carry them over;
+ * without them a new hero is created. The zone is as strong as the hero
+ * entering it unless a level is given. `from` places the hero at the exit
+ * that leads back to the zone they came from.
  */
 export function createWorld(
   seed: number,
   character: Character = newCharacter(STARTING_WEAPON),
   dungeonLevel: number = character.level,
+  zone: ZoneKind = 'dungeon',
+  from: ZoneKind | null = null,
 ): World {
   const level = Math.min(MAX_LEVEL, Math.max(1, Math.floor(character.level)));
-  const monsterHp = monsterMaxHp(dungeonLevel);
   const rng = createRng(seed >>> 0);
-  const width = ROOM_SIZE;
-  const height = ROOM_SIZE;
-  const spawn = { x: Math.floor(width / 2), y: Math.floor(height / 2) };
-  const tiles: Tile[] = [];
+  const layout = buildZone(zone, rng);
+  const { map, spawn, monsterKind } = layout;
+  const { width, height } = map;
+  const arrival = layout.exits.find((exit) => exit.to === from)?.pos ?? spawn;
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const border = x === 0 || y === 0 || x === width - 1 || y === height - 1;
-      const nearSpawn = Math.abs(x - spawn.x) <= 1 && Math.abs(y - spawn.y) <= 1;
-      const pillar = !border && !nearSpawn && rng.next() < PILLAR_CHANCE;
-      tiles.push(border || pillar ? TILE_WALL : TILE_FLOOR);
-    }
-  }
-
-  // Close off pockets the player could never reach, so that every floor tile
-  // the player can see is a valid destination.
-  const map: GridMap = { width, height, tiles };
-  const reachable = new Array<boolean>(width * height).fill(false);
-  const queue: Point[] = [spawn];
-  reachable[spawn.y * width + spawn.x] = true;
-  while (queue.length > 0) {
-    const { x, y } = queue.shift() as Point;
-    for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
-      const nx = x + dx;
-      const ny = y + dy;
-      const index = ny * width + nx;
-      if (isWalkable(map, nx, ny) && !reachable[index]) {
-        reachable[index] = true;
-        queue.push({ x: nx, y: ny });
-      }
-    }
-  }
-  for (let i = 0; i < tiles.length; i++) {
-    if (!reachable[i]) tiles[i] = TILE_WALL;
-  }
-
-  // Monsters stand on distinct floor tiles away from the entrance.
+  // Monsters stand on distinct floor tiles away from where the hero arrives.
   const candidates: Point[] = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (isWalkable(map, x, y) && Math.hypot(x - spawn.x, y - spawn.y) >= MONSTER_MIN_SPAWN_DISTANCE) {
-        candidates.push({ x, y });
+  if (monsterKind !== null) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const far = [spawn, arrival].every((p) => Math.hypot(x - p.x, y - p.y) >= MONSTER_MIN_SPAWN_DISTANCE);
+        if (isWalkable(map, x, y) && far) candidates.push({ x, y });
       }
     }
   }
+  const kind: MonsterKind = monsterKind ?? 'grunt';
+  const monsterHp = monsterMaxHp(dungeonLevel, kind);
   const monsters: Monster[] = [];
   while (monsters.length < MONSTER_COUNT && candidates.length > 0) {
     const [home] = candidates.splice(rng.int(0, candidates.length - 1), 1) as [Point];
     monsters.push({
       id: monsters.length,
-      kind: 'grunt',
+      kind,
       home,
       pos: { ...home },
       hp: monsterHp,
@@ -247,19 +229,21 @@ export function createWorld(
     tick: 0,
     rngState: rng.state,
     map,
+    zone,
     spawn,
-    // The tiles around the entrance are always free, so the merchant never stands in a wall.
-    merchant: { x: spawn.x - 1, y: spawn.y - 1 },
+    merchant: layout.merchant,
+    exits: layout.exits,
     player: {
-      pos: { ...spawn },
+      pos: { ...arrival },
       moveDir: { x: 0, y: 0 },
       path: [],
       distance: 0,
-      hp: maxHpAtLevel(level),
+      // Carried-over health is kept within sensible bounds; a hero never arrives dead.
+      hp: carried(character.hp, 1, maxHpAtLevel(level)),
       maxHp: maxHpAtLevel(level),
       level,
       xp: character.xp,
-      mp: maxMpAtLevel(level),
+      mp: carried(character.mp, 0, maxMpAtLevel(level)),
       maxMp: maxMpAtLevel(level),
       skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0 },
       chargesOn: false,

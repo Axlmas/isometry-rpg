@@ -10,3 +10,4 @@ export * from './shop';
 export * from './skills';
 export * from './step';
 export * from './world';
+export * from './zones';

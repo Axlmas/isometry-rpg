@@ -17,6 +17,9 @@ export interface Character {
   coins: number;
   inventory: ItemStack[];
   equipment: Record<EquipSlot, ItemId | null>;
+  /** Current health and mana, when they should carry over; otherwise the hero arrives fully restored. */
+  hp?: number;
+  mp?: number;
 }
 
 export function newCharacter(startingWeapon: ItemId): Character {
@@ -26,6 +29,11 @@ export function newCharacter(startingWeapon: ItemId): Character {
 export function characterOf(world: World): Character {
   const { level, xp, coins, inventory, equipment } = world.player;
   return { level, xp, coins, inventory: inventory.map((stack) => ({ ...stack })), equipment: { ...equipment } };
+}
+
+/** Like `characterOf`, but the hero also keeps their current health and mana: for walking between zones. */
+export function travelerOf(world: World): Character {
+  return { ...characterOf(world), hp: world.player.hp, mp: world.player.mp };
 }
 
 export function playerDamage(player: Player): readonly [number, number] {

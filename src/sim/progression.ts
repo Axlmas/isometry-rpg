@@ -1,5 +1,5 @@
 import {
-  DEATH_XP_LOSS, MAX_LEVEL, MONSTER_DAMAGE_PER_LEVEL, MONSTER_HP_PER_LEVEL, MONSTER_MAX_HP, MONSTER_XP,
+  DEATH_XP_LOSS, MAX_LEVEL, type MonsterKind, MONSTER_KINDS, MONSTER_DAMAGE_PER_LEVEL, MONSTER_HP_PER_LEVEL, MONSTER_MAX_HP, MONSTER_XP,
   MONSTER_XP_PER_LEVEL, PLAYER_DAMAGE_PER_LEVEL, PLAYER_HP_PER_LEVEL, PLAYER_MAX_HP, PLAYER_MAX_MP,
   PLAYER_MP_PER_LEVEL, XP_CURVE_BASE, XP_CURVE_POWER,
 } from './balance';
@@ -24,15 +24,15 @@ export function damageBonusAtLevel(level: number): number {
   return 1 + PLAYER_DAMAGE_PER_LEVEL * (level - 1);
 }
 
-// Monsters grow with the dungeon level so that a stronger hero still has a fight.
-export function monsterMaxHp(dungeonLevel: number): number {
-  return Math.round(MONSTER_MAX_HP * (1 + MONSTER_HP_PER_LEVEL * (dungeonLevel - 1)));
+// Monsters grow with the zone's level so that a stronger hero still has a fight.
+export function monsterMaxHp(zoneLevel: number, kind: MonsterKind = 'grunt'): number {
+  return Math.round(MONSTER_MAX_HP * (1 + MONSTER_HP_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].hp);
 }
-export function monsterDamageBonus(dungeonLevel: number): number {
-  return 1 + MONSTER_DAMAGE_PER_LEVEL * (dungeonLevel - 1);
+export function monsterDamageBonus(zoneLevel: number, kind: MonsterKind = 'grunt'): number {
+  return (1 + MONSTER_DAMAGE_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].damage;
 }
-export function monsterXp(dungeonLevel: number): number {
-  return Math.round(MONSTER_XP * (1 + MONSTER_XP_PER_LEVEL * (dungeonLevel - 1)));
+export function monsterXp(zoneLevel: number, kind: MonsterKind = 'grunt'): number {
+  return Math.round(MONSTER_XP * (1 + MONSTER_XP_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].xp);
 }
 
 /** Skills that become available exactly at `level`. */

@@ -6,7 +6,7 @@ import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
 import { dropFromInventory, equipFromInventory, pickUpLoot, spendCharge, toggleCharges, unequip, useItem } from './inventory';
-import { buy, sell } from './shop';
+import { buy, sell, travel } from './shop';
 import { findPath } from './pathfinding';
 import { SKILL_IDS, useSkill } from './skills';
 import type { Command, World } from './world';
@@ -121,6 +121,9 @@ function applyCommand(world: World, command: Command): void {
       return;
     case 'sell':
       sell(world, command.index, command.count);
+      return;
+    case 'travel':
+      travel(world);
       return;
   }
 }

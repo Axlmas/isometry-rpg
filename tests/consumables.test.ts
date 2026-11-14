@@ -5,13 +5,14 @@ import {
   newCharacter, removeItem, sellPrice, step,
 } from '../src/sim';
 
-function arena(offsets: Array<[number, number]> = [], level = 1): World {
-  const world = createWorld(5, { ...newCharacter('trainingSword'), level });
+function arena(offsets: Array<[number, number]> = [], level = 1, zone: 'dungeon' | 'village' = 'dungeon'): World {
+  const world = createWorld(5, { ...newCharacter('trainingSword'), level }, undefined, zone);
+  if (zone === 'village') return world;
   const { map } = world;
   for (let y = 1; y < map.height - 1; y++) {
     for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;
   }
-  const template = world.monsters[0] as Monster;
+  const template = createWorld(5).monsters[0] as Monster;
   world.monsters = offsets.map(([dx, dy], id) => ({
     ...template, id, hp: 10000, maxHp: 10000,
     home: { x: world.spawn.x + dx, y: world.spawn.y + dy },
@@ -169,16 +170,28 @@ describe('weapon charges', () => {
 });
 
 describe('merchant', () => {
-  it('stands on a free tile next to the entrance in every dungeon', () => {
-    for (const seed of [1, 2, 3, 99]) {
-      const world = createWorld(seed);
-      expect(circleFree(world.map, world.merchant, 0.3)).toBe(true);
-      expect(isNearMerchant(world)).toBe(true);
-    }
+  /** A hero standing next to the village merchant. */
+  const shop = (): World => {
+    const world = arena([], 1, 'village');
+    world.player.pos = { x: world.merchant!.x + 1, y: world.merchant!.y };
+    return world;
+  };
+
+  it('stands on a free tile in the village', () => {
+    const world = arena([], 1, 'village');
+    expect(circleFree(world.map, world.merchant!, 0.3)).toBe(true);
+    expect(isNearMerchant(shop())).toBe(true);
+  });
+
+  it('does not trade outside the village', () => {
+    const world = arena();
+    world.player.coins = 1000;
+    step(world, [{ type: 'buy', itemId: 'healthPotion', count: 1 }]);
+    expect(world.events).toEqual([{ type: 'tradeDenied', reason: 'far' }]);
   });
 
   it('sells stock for its price', () => {
-    const world = arena();
+    const world = shop();
     world.player.coins = 100;
     step(world, [{ type: 'buy', itemId: 'healthPotion', count: 2 }]);
     expect(world.player.coins).toBe(100 - 2 * buyPrice('healthPotion'));
@@ -187,22 +200,22 @@ describe('merchant', () => {
   });
 
   it('refuses, changing nothing, without coins, room or closeness', () => {
-    const poor = arena();
+    const poor = shop();
     poor.player.coins = 24;
     step(poor, [{ type: 'buy', itemId: 'healthPotion', count: 1 }]);
     expect(poor.events).toEqual([{ type: 'tradeDenied', reason: 'coins' }]);
     expect(poor.player.coins).toBe(24);
 
-    const full = arena();
+    const full = shop();
     full.player.coins = 10000;
     while (full.player.inventory.length < INVENTORY_SLOTS) full.player.inventory.push({ itemId: 'ironSword', count: 1 });
     step(full, [{ type: 'buy', itemId: 'leatherCap', count: 1 }]);
     expect(full.events).toEqual([{ type: 'tradeDenied', reason: 'full' }]);
     expect(full.player.coins).toBe(10000);
 
-    const far = arena();
+    const far = shop();
     far.player.coins = 10000;
-    far.player.pos = { x: far.merchant.x + MERCHANT_RANGE + 0.5, y: far.merchant.y };
+    far.player.pos = { x: far.merchant!.x + MERCHANT_RANGE + 0.5, y: far.merchant!.y };
     addItem(far.player, 'coal', 3);
     step(far, [{ type: 'buy', itemId: 'healthPotion', count: 1 }, { type: 'sell', index: 0, count: 1 }]);
     expect(types(far)).toEqual(['tradeDenied', 'tradeDenied']);
@@ -211,7 +224,7 @@ describe('merchant', () => {
   });
 
   it('ignores orders for things he does not stock and for impossible amounts', () => {
-    const world = arena();
+    const world = shop();
     world.player.coins = 10 ** 9;
     step(world, [
       { type: 'buy', itemId: 'soldierBlade', count: 1 }, { type: 'buy', itemId: 'coins', count: 5 },
@@ -225,7 +238,7 @@ describe('merchant', () => {
   });
 
   it('buys from the bag at half price', () => {
-    const world = arena();
+    const world = shop();
     addItem(world.player, 'ironOre', 10);
     addItem(world.player, 'chainShirt', 1);
     step(world, [{ type: 'sell', index: 0, count: 4 }]);
@@ -239,7 +252,7 @@ describe('merchant', () => {
   it('never pays more than he charges, and refuses worthless things and wrong amounts', () => {
     for (const itemId of SHOP_STOCK) expect(sellPrice(itemId)).toBeLessThan(buyPrice(itemId));
     for (const def of Object.values(ITEMS)) expect(sellPrice(def.id) * 2).toBeLessThanOrEqual(buyPrice(def.id));
-    const world = arena();
+    const world = shop();
     addItem(world.player, 'chargePlain', 50); // worth 1 coin each, sells for nothing
     addItem(world.player, 'coal', 2);
     step(world, [{ type: 'sell', index: 0, count: 50 }]);
@@ -251,7 +264,7 @@ describe('merchant', () => {
   });
 
   it('cannot be used to make coins by buying and selling back', () => {
-    const world = arena();
+    const world = shop();
     world.player.coins = 1000;
     for (let i = 0; i < 20; i++) {
       step(world, [{ type: 'buy', itemId: 'ironSword', count: 1 }]);

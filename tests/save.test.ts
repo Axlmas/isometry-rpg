@@ -91,6 +91,22 @@ describe('save', () => {
     }
   });
 
+  it('remembers which zone the hero is in', () => {
+    for (const zone of ['village', 'field', 'dungeon'] as const) {
+      const world = createWorld(31337, undefined, undefined, zone);
+      const loaded = parseSave(serializeWorld(world));
+      expect(loaded.status).toBe('ok');
+      if (loaded.status !== 'ok') continue;
+      expect(loaded.world.zone).toBe(zone);
+      expect(loaded.world.map).toEqual(world.map);
+      expect(loaded.world.monsters).toEqual(world.monsters);
+    }
+    const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
+    for (const zone of ['castle', null, 3, undefined]) {
+      expect(parseSave(JSON.stringify({ ...good, zone })).status, String(zone)).toBe('damaged');
+    }
+  });
+
   it('rejects saves with impossible progress', () => {
     const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
     const cases: Array<Record<string, unknown>> = [
@@ -182,6 +198,8 @@ describe('save', () => {
         equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [] },
       { version: 5, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
         equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [], level: 1, xp: 0, mp: null, dungeonLevel: 1 },
+      { version: 6, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
+        equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [], level: 1, xp: 0, mp: null, dungeonLevel: 1, chargesOn: false },
     ]) {
       const loaded = parseSave(JSON.stringify(old));
       expect(loaded.status).toBe('ok');
@@ -195,6 +213,7 @@ describe('save', () => {
       expect(loaded.world.player).toMatchObject({ level: 1, xp: 0, mp: fresh.player.maxMp });
       expect(loaded.world.dungeonLevel).toBe(1);
       expect(loaded.world.player.chargesOn).toBe(false);
+      expect(loaded.world.zone).toBe('dungeon');
     }
   });
 
