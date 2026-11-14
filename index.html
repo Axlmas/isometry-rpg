@@ -11,9 +11,12 @@
   <div id="hud">
     <header class="panel">
       <h1 data-i18n="game.title"></h1>
-      <p id="steps"></p>
+      <div id="health" role="meter" aria-valuemin="0"><div id="health-fill"></div></div>
+      <p id="health-text"></p>
+      <p id="monsters"></p>
       <p id="hint"></p>
     </header>
+    <button id="attack" type="button" data-i18n="hud.attack" hidden></button>
     <footer class="panel">
       <div class="actions">
         <button id="new-dungeon" type="button" data-i18n="hud.newDungeon"></button>
@@ -32,9 +35,17 @@
     </form>
   </dialog>
 
+  <div id="death" class="overlay" role="alertdialog" aria-labelledby="death-title" aria-describedby="death-body" hidden>
+    <div>
+      <h2 id="death-title" data-i18n="death.title"></h2>
+      <p id="death-body" data-i18n="death.body"></p>
+      <button id="death-respawn" type="button" class="primary" data-i18n="death.respawn"></button>
+    </div>
+  </div>
+
   <div id="toast" role="status" aria-live="polite" hidden></div>
 
-  <div id="error" role="alertdialog" aria-labelledby="error-title" aria-describedby="error-body" hidden>
+  <div id="error" class="overlay" role="alertdialog" aria-labelledby="error-title" aria-describedby="error-body" hidden>
     <div>
       <h2 id="error-title" data-i18n="error.title"></h2>
       <p id="error-body"></p>

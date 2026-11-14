@@ -2,8 +2,12 @@
   "game.title": "Working title of the game. Do not translate until a final name is chosen.",
   "hud.hintKeyboard": "Shown on devices with a mouse and keyboard. WASD are physical key positions and stay in Latin letters in every language.",
   "hud.hintTouch": "Shown on phones and tablets instead of hud.hintKeyboard.",
-  "hud.steps": "{count} is the distance the hero has walked, in whole steps. Needs every plural form of the target language.",
   "hud.language": "Button label. {language} is the language's own name (for example 'Русский') and is not translated.",
   "confirm.newDungeon.yes": "Destructive action button. Keep it short: it sits next to another button on a phone screen.",
-  "error.body": "'Last stop' means the last time the hero finished walking; that is when the game saves."
+  "error.body": "'Last stop' means the last time the hero finished walking; that is when the game saves.",
+  "hud.health": "Shown under the health bar and read by screen readers.",
+  "hud.monsters": "{count} is the number of living monsters in the dungeon. The =0 form is a short victory message.",
+  "hud.attack": "Label of the round on-screen button on phones. One short word.",
+  "death.title": "Heading of the defeat screen. Solemn, not jokey.",
+  "death.respawn": "Button that brings the hero back to life at the dungeon entrance."
 }

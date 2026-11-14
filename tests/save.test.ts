@@ -33,6 +33,28 @@ describe('save', () => {
     expect(loaded.world.map).toEqual(world.map);
     expect(loaded.world.player.pos).toEqual(world.player.pos);
     expect(loaded.world.player.distance).toBe(world.player.distance);
+    expect(loaded.world.rngState).toBe(world.rngState);
+  });
+
+  it('remembers health and which monsters are dead; survivors are back at full health', () => {
+    const world = createWorld(31337);
+    world.player.hp = 37;
+    world.monsters = world.monsters.filter((m) => m.id !== 2 && m.id !== 5);
+    (world.monsters[0] as { hp: number }).hp = 1;
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+    expect(loaded.world.player.hp).toBe(37);
+    expect(loaded.world.monsters.map((m) => m.id)).toEqual([0, 1, 3, 4, 6, 7, 8]);
+    expect(loaded.world.monsters.every((m) => m.hp === m.maxHp)).toBe(true);
+    expect(loaded.world.monsterTotal).toBe(9);
+  });
+
+  it('keeps the hero dead if the game was closed on the defeat screen', () => {
+    const world = createWorld(8);
+    world.player.hp = 0;
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status === 'ok' && loaded.world.player.hp).toBe(0);
   });
 
   it('reports no save on first launch', () => {
@@ -56,16 +78,34 @@ describe('save', () => {
       JSON.stringify({ ...good, distance: -5 }),
       JSON.stringify({ ...good, distance: 1e999 }),
       JSON.stringify({ ...good, version: 1 }), // v1 needs tilesWalked
+      JSON.stringify({ ...good, hp: 101 }),
+      JSON.stringify({ ...good, hp: -1 }),
+      JSON.stringify({ ...good, hp: 50.5 }),
+      JSON.stringify({ ...good, hp: undefined }),
+      JSON.stringify({ ...good, dead: [9] }),
+      JSON.stringify({ ...good, dead: [1, 1] }),
+      JSON.stringify({ ...good, dead: 'all' }),
+      JSON.stringify({ ...good, dead: [0.5] }),
+      JSON.stringify({ ...good, rngState: -1 }),
+      JSON.stringify({ ...good, rngState: 2 ** 40 }),
     ];
     for (const raw of cases) expect(parseSave(raw).status, raw).toBe('damaged');
   });
 
-  it('upgrades a save from the previous version', () => {
-    const world = createWorld(1);
-    const old = JSON.stringify({ version: 1, seed: 1, x: world.spawn.x, y: world.spawn.y, tilesWalked: 12 });
-    const loaded = parseSave(old);
-    expect(loaded.status).toBe('ok');
-    if (loaded.status === 'ok') expect(loaded.world.player.distance).toBe(12);
+  it('upgrades saves from earlier versions to a fresh start in the same dungeon', () => {
+    const fresh = createWorld(1);
+    for (const old of [
+      { version: 1, seed: 1, x: 9, y: 9, tilesWalked: 12 },
+      { version: 2, seed: 1, x: 9.4, y: 8.1, distance: 12 },
+    ]) {
+      const loaded = parseSave(JSON.stringify(old));
+      expect(loaded.status).toBe('ok');
+      if (loaded.status !== 'ok') continue;
+      expect(loaded.world.player.distance).toBe(12);
+      expect(loaded.world.player.pos).toEqual(fresh.spawn);
+      expect(loaded.world.player.hp).toBe(fresh.player.maxHp);
+      expect(loaded.world.monsters).toEqual(fresh.monsters);
+    }
   });
 
   it('survives storage that throws', () => {

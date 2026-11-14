@@ -4,7 +4,7 @@ import en from '../src/i18n/locales/en.json';
 import { pseudolocalize } from '../src/i18n/pseudo';
 
 const KEYS = Object.keys(en) as MessageKey[];
-const SAMPLE = { count: 3, language: 'English' };
+const SAMPLE = { count: 3, language: 'English', current: 40, max: 100 };
 
 describe('I18n', () => {
   it('formats every message in every locale without problems', () => {
@@ -21,14 +21,14 @@ describe('I18n', () => {
   it('applies the plural rules of each language', () => {
     const i18n = new I18n();
     i18n.setLocale('ru');
-    expect(i18n.t('hud.steps', { count: 0 })).toBe('Вы ещё не сделали ни шага');
-    expect(i18n.t('hud.steps', { count: 1 })).toBe('Пройден 1 шаг');
-    expect(i18n.t('hud.steps', { count: 3 })).toBe('Пройдено 3 шага');
-    expect(i18n.t('hud.steps', { count: 5 })).toBe('Пройдено 5 шагов');
-    expect(i18n.t('hud.steps', { count: 21 })).toBe('Пройден 21 шаг');
+    expect(i18n.t('hud.monsters', { count: 0 })).toMatch(/^Подземелье зачищено/);
+    expect(i18n.t('hud.monsters', { count: 1 })).toBe('Остался 1 монстр');
+    expect(i18n.t('hud.monsters', { count: 3 })).toBe('Осталось 3 монстра');
+    expect(i18n.t('hud.monsters', { count: 5 })).toBe('Осталось 5 монстров');
+    expect(i18n.t('hud.monsters', { count: 21 })).toBe('Остался 21 монстр');
     i18n.setLocale('en');
-    expect(i18n.t('hud.steps', { count: 1 })).toBe('1 step taken');
-    expect(i18n.t('hud.steps', { count: 1234 })).toBe('1,234 steps taken');
+    expect(i18n.t('hud.monsters', { count: 1 })).toBe('1 monster left');
+    expect(i18n.t('hud.health', { current: 1234, max: 5000 })).toBe('Health: 1,234 of 5,000');
   });
 
   it('falls back to English when a translation is missing or malformed', () => {

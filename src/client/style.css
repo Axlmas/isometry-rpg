@@ -18,8 +18,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #12141a; col
 h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.04em; }
 p { margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
 #hint, #save-status { color: var(--muted); font-size: 14px; }
+#health { block-size: 10px; background: #2a2d36; border-radius: 5px; overflow: hidden; margin-block: 6px 4px; min-inline-size: 180px; }
+#health-fill { block-size: 100%; background: #d9534f; transition: inline-size 120ms linear; }
+#health-text, #monsters { font-size: 15px; margin-block: 2px; }
+#monsters.cleared { color: var(--accent); }
+#hud > header { margin-block-end: auto; }
+#attack { align-self: flex-end; margin-block-end: 12px; min-inline-size: 96px; min-block-size: 96px; border-radius: 50%; text-align: center;
+  background: #6b2f2f; border: 2px solid #d9534f; font-weight: 600; touch-action: none; user-select: none; -webkit-user-select: none; }
+#attack:active { background: #8a3a3a; }
 #save-status.warning { color: var(--warning); }
-#steps { font-size: 15px; margin-block: 2px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
 button { font: inherit; color: var(--ink); background: #2a2d36; border: 1px solid #454956; border-radius: 8px;
   padding: 10px 14px; min-height: 44px; cursor: pointer; text-align: start; }
@@ -29,11 +36,12 @@ button.primary { background: #6b4f1d; border-color: var(--accent); }
 dialog { background: #1b1e26; color: var(--ink); border: 1px solid #454956; border-radius: 12px; padding: 20px;
   max-width: min(92vw, 420px); }
 dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-dialog h2, #error h2 { margin: 0 0 8px; font-size: 20px; }
+dialog h2, .overlay h2 { margin: 0 0 8px; font-size: 20px; }
 dialog form { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 16px; }
 #toast { position: fixed; inset-inline: 12px; top: 50%; margin-inline: auto; width: fit-content; max-width: min(92vw, 420px);
   background: #1b1e26; border: 1px solid var(--accent); border-radius: 10px; padding: 12px 16px; }
-#error { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.75); padding: 16px; }
-#error > div { background: #1b1e26; border: 1px solid #454956; border-radius: 12px; padding: 20px; max-width: 420px; }
-#error button { margin-block-start: 16px; }
+.overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.75); padding: 16px; }
+.overlay > div { background: #1b1e26; border: 1px solid #454956; border-radius: 12px; padding: 20px; max-width: 420px; }
+.overlay button { margin-block-start: 16px; }
+#death { background: rgba(40, 0, 0, 0.55); }
 [hidden] { display: none !important; }

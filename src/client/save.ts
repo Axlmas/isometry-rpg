@@ -1,7 +1,7 @@
-import { type World, PLAYER_RADIUS, circleFree, createWorld } from '../sim';
+import { type World, PLAYER_MAX_HP, PLAYER_RADIUS, circleFree, createWorld } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -15,6 +15,12 @@ interface SaveData {
   y: number;
   /** Total distance walked, in tiles. */
   distance: number;
+  /** Zero means the hero is dead and the game opens on the defeat screen. */
+  hp: number;
+  /** IDs of the monsters already killed in this dungeon. */
+  dead: number[];
+  /** State of the combat random generator, so reloading does not re-roll outcomes. */
+  rngState: number;
 }
 
 export type LoadResult =
@@ -36,23 +42,39 @@ export function openStorage(): KeyValueStore | null {
 }
 
 export function serializeWorld(world: World): string {
-  // The map is not stored: it is rebuilt from the seed.
+  // The map and the monsters' starting places are not stored: they are rebuilt
+  // from the seed. Surviving monsters are back at full health after a reload.
+  const alive = new Set(world.monsters.map((monster) => monster.id));
+  const dead: number[] = [];
+  for (let id = 0; id < world.monsterTotal; id++) if (!alive.has(id)) dead.push(id);
   const data: SaveData = {
     version: SAVE_VERSION,
     seed: world.seed,
     x: world.player.pos.x,
     y: world.player.pos.y,
     distance: world.player.distance,
+    hp: world.player.hp,
+    dead,
+    rngState: world.rngState,
   };
   return JSON.stringify(data);
 }
 
-/** Brings a save written by an older version of the game up to date. */
+/** Brings a save written by an older version of the game up to date, one version at a time. */
 function migrate(data: Record<string, unknown>): Record<string, unknown> {
+  let current = data;
   // v1 counted whole tiles; v2 stores the distance walked.
-  if (data.version === 1) return { ...data, version: 2, distance: data.tilesWalked };
-  return data;
+  if (current.version === 1) current = { ...current, version: 2, distance: current.tilesWalked };
+  // v3 added combat and a larger room, so the old position no longer applies:
+  // the hero starts at the entrance of the same dungeon with full health.
+  if (current.version === 2) {
+    current = { ...current, version: 3, x: null, y: null, hp: PLAYER_MAX_HP, dead: [], rngState: null };
+  }
+  return current;
 }
+
+const isInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 /** Saved data can be edited or corrupted, so every field is checked. */
 export function parseSave(raw: string | null): LoadResult {
@@ -60,22 +82,36 @@ export function parseSave(raw: string | null): LoadResult {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { status: 'damaged' };
-    const data = migrate(parsed as Record<string, unknown>) as Partial<SaveData>;
-    const { seed, x, y, distance } = data;
-    if (
-      data.version !== SAVE_VERSION ||
-      typeof seed !== 'number' || !Number.isInteger(seed) ||
-      typeof x !== 'number' || !Number.isFinite(x) ||
-      typeof y !== 'number' || !Number.isFinite(y) ||
-      typeof distance !== 'number' || !Number.isFinite(distance) || distance < 0
-    ) {
+    const data = migrate(parsed as Record<string, unknown>);
+    const { seed, x, y, distance, hp, dead, rngState } = data;
+    if (data.version !== SAVE_VERSION || !isInt(seed) || !isFiniteNumber(distance) || distance < 0) {
       return { status: 'damaged' };
     }
     const world = createWorld(seed);
-    // A position inside or overlapping a wall cannot come from normal play.
-    if (!circleFree(world.map, { x, y }, PLAYER_RADIUS)) return { status: 'damaged' };
-    world.player.pos = { x, y };
+
+    // `null` is written by migrations and means "use the default".
+    if (x !== null || y !== null) {
+      if (!isFiniteNumber(x) || !isFiniteNumber(y)) return { status: 'damaged' };
+      // A position inside or overlapping a wall cannot come from normal play.
+      if (!circleFree(world.map, { x, y }, PLAYER_RADIUS)) return { status: 'damaged' };
+      world.player.pos = { x, y };
+    }
+    if (!isInt(hp) || hp < 0 || hp > world.player.maxHp) return { status: 'damaged' };
+    if (
+      !Array.isArray(dead) ||
+      !dead.every((id) => isInt(id) && id >= 0 && id < world.monsterTotal) ||
+      new Set(dead).size !== dead.length
+    ) {
+      return { status: 'damaged' };
+    }
+    if (rngState !== null) {
+      if (!isInt(rngState) || rngState < 0 || rngState > 0xffffffff) return { status: 'damaged' };
+      world.rngState = rngState;
+    }
+
     world.player.distance = distance;
+    world.player.hp = hp;
+    world.monsters = world.monsters.filter((monster) => !dead.includes(monster.id));
     return { status: 'ok', world };
   } catch {
     return { status: 'damaged' };
