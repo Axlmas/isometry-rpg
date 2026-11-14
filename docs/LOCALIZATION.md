@@ -41,8 +41,8 @@
   `{d, date}`), вручную их не форматируем.
 - **Названия предметов, слотов, грейдов и умений.** Правила знают только ID. Ключ по ID
   берётся из таблиц в `src/client/itemText.ts` (`ITEM_NAME`, `SLOT_NAME`, `GRADE_NAME`)
-  и `src/client/skillText.ts` (`SKILL_NAME`, `SKILL_INFO`), названия зон —
-  в `src/client/zoneText.ts` (`ZONE_NAME`), где он
+  и `src/client/skillText.ts` (`SKILL_NAME`, `SKILL_INFO`), названия регионов —
+  в `src/client/zoneText.ts` (`REGION_NAME`), где он
   записан целиком: `ironSword: 'item.ironSword'`. Названия предметов — в словарной форме;
   фразы вокруг них строятся так, чтобы эта форма подходила («Подобрано: Железный меч»).
 - **Названия языков** в переключателе (`English`, `Русский`) не переводятся и лежат в
