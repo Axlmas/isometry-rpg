@@ -5,7 +5,7 @@ import {
 } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -14,7 +14,7 @@ export type KeyValueStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 interface SaveData {
   version: number;
-  /** Which zone the hero is in. */
+  /** Which map the hero is on. */
   zone: ZoneKind;
   seed: number;
   x: number;
@@ -61,11 +61,14 @@ export function openStorage(): KeyValueStore | null {
 }
 
 export function serializeWorld(world: World): string {
-  // The map and the monsters' starting places are not stored: they are rebuilt
-  // from the seed. Surviving monsters are back at full health after a reload.
+  // The map and the monsters' places are not stored: they are rebuilt from the
+  // seed. Surviving monsters are back at full health after a reload. Only a
+  // dungeon remembers its dead; in the open world monsters come back anyway.
   const alive = new Set(world.monsters.map((monster) => monster.id));
   const dead: number[] = [];
-  for (let id = 0; id < world.monsterTotal; id++) if (!alive.has(id)) dead.push(id);
+  if (world.zone === 'dungeon') {
+    for (let id = 0; id < world.monsterTotal; id++) if (!alive.has(id)) dead.push(id);
+  }
   const data: SaveData = {
     version: SAVE_VERSION,
     zone: world.zone,
@@ -109,6 +112,13 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
   if (current.version === 5) current = { ...current, version: 6, chargesOn: false };
   // v7 added zones; older saves were always inside a dungeon.
   if (current.version === 6) current = { ...current, version: 7, zone: 'dungeon' };
+  // v8 joined the village and the field into one open world. A hero saved in
+  // either wakes up in the village; a hero in the dungeon stays there.
+  if (current.version === 7) {
+    current = current.zone === 'dungeon'
+      ? { ...current, version: 8 }
+      : { ...current, version: 8, zone: 'overworld', x: null, y: null, dead: [], loot: [] };
+  }
   return current;
 }
 

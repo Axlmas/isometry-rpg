@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import {
-  type GameEvent, type World, type ZoneKind, MAX_LEVEL, SKILLS,
-  characterOf, createWorld, isAlive, isNearMerchant, nearestExit, travelerOf, xpToNextLevel,
+  type GameEvent, type Region, type World, type ZoneKind, MAX_LEVEL, SKILLS,
+  characterOf, createWorld, isAlive, isNearMerchant, minesLevelFor, nearestExit, regionAt, travelerOf, xpToNextLevel,
 } from '../sim';
 import { DungeonScene } from './DungeonScene';
 import { Hud } from './hud';
@@ -13,7 +13,7 @@ import { loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './sav
 import { ShopPanel } from './shopPanel';
 import { SkillBar } from './skillBar';
 import { SKILL_NAME } from './skillText';
-import { ZONE_NAME } from './zoneText';
+import { REGION_NAME } from './zoneText';
 import './style.css';
 
 const storage = openStorage();
@@ -31,8 +31,9 @@ function newSeed(): number {
 }
 
 const loaded = loadWorld(storage);
-// A new hero starts in the village.
-let world: World = loaded.status === 'ok' ? loaded.world : createWorld(newSeed(), undefined, undefined, 'village');
+// A new hero starts in the village, in the open world.
+let world: World = loaded.status === 'ok' ? loaded.world : createWorld(newSeed(), undefined, undefined, 'overworld');
+let region: Region | null = null;
 
 function persist(): void {
   if (storage) hud.setCanSave(saveWorld(storage, world));
@@ -43,34 +44,66 @@ function promptText(w: World): string | null {
   if (!isAlive(w) || shop.isOpen) return null;
   if (isNearMerchant(w)) return i18n.t('prompt.trade');
   const exit = nearestExit(w);
-  return exit ? i18n.t('prompt.travel', { zone: i18n.t(ZONE_NAME[exit.to]) }) : null;
+  return exit ? i18n.t('prompt.travel', { zone: i18n.t(REGION_NAME[exit.leadsTo]) }) : null;
 }
 
 function showStats(w: World): void {
   hud.setHealth(w.player.hp, w.player.maxHp);
   hud.setMana(w.player.mp, w.player.maxMp);
   hud.setProgress(w.player.level, w.player.xp, w.player.level < MAX_LEVEL ? xpToNextLevel(w.player.level) : 0);
-  hud.setZone(i18n.t(ZONE_NAME[w.zone]), w.zone === 'village' ? null : w.dungeonLevel, w.monsters.length);
+  showRegion(w, false);
   hud.setDeathVisible(!isAlive(w));
   onTick(w);
   inventory.update(w);
 }
 
+/** How dangerous a region is, in words. */
+function dangerText(w: World, r: Region): string {
+  if (r.safe) return i18n.t('zone.safe');
+  if (r.levels === null) return i18n.t('zone.level', { level: w.dungeonLevel });
+  return i18n.t('zone.levels', { min: r.levels[0], max: r.levels[1] });
+}
+
+/** Keeps the HUD's region line current; `announce` also shows the big banner when the region changed. */
+function showRegion(w: World, announce: boolean): void {
+  const now = regionAt(w.zone, w.player.pos);
+  const changed = now !== region;
+  region = now;
+  const name = i18n.t(REGION_NAME[now.id]);
+  const danger = dangerText(w, now);
+  // Monsters are only counted in the dungeon: it can be cleared, the open world cannot.
+  hud.setZone(name, danger, w.zone === 'dungeon' ? w.monsters.length : null);
+  if (changed && announce) hud.showBanner(name, danger);
+}
+
 /** Things that count down or depend on where the hero stands; cheap enough for every tick. */
 function onTick(w: World): void {
+  if (regionAt(w.zone, w.player.pos) !== region) showRegion(w, true);
   skillBar.update(w);
   quickBar.update(w);
   shop.update(w);
   hud.setPrompt(promptText(w));
 }
 
-/** Moves the hero to another zone. The village restores them; elsewhere they arrive as they left. */
+/** Moves the hero to the other map: into the mines or back out. They arrive as they left. */
 function travelTo(to: ZoneKind): void {
-  const hero = to === 'village' ? characterOf(world) : travelerOf(world);
-  world = createWorld(newSeed(), hero, undefined, to, world.zone);
+  const hero = travelerOf(world);
+  world = createWorld(newSeed(), hero, minesLevelFor(hero.level), to, world.zone);
+  enterWorld();
+}
+
+/** A fallen hero wakes up in the village, restored. */
+function wakeInVillage(): void {
+  if (world.zone === 'dungeon') world = createWorld(newSeed(), characterOf(world), undefined, 'overworld');
+  enterWorld();
+}
+
+function enterWorld(): void {
   shop.toggle(false);
   scene.setWorld(world);
+  region = null;
   showStats(world);
+  showRegion(world, true);
   persist();
 }
 
@@ -109,8 +142,7 @@ const scene = new DungeonScene(world, {
     hud.setXpLost(xpLost);
     showStats(w);
   },
-  // A fallen hero wakes up in the village.
-  onRespawn: () => travelTo('village'),
+  onRespawn: wakeInVillage,
   onTravel: travelTo,
   onTick,
   onLevelUp: (level, unlocked) => {
@@ -166,6 +198,9 @@ const hud = new Hud({
 });
 
 showStats(world);
+// Say where the hero is when the game opens.
+region = null;
+showRegion(world, true);
 if (loaded.status === 'damaged') hud.toast('toast.saveDamaged');
 persist();
 window.addEventListener('pagehide', persist);

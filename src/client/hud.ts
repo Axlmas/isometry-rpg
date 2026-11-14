@@ -24,6 +24,7 @@ export class Hud {
   private progress = { level: 1, xp: 0, needed: 1 };
   private xpLost = 0;
   private toastTimer: number | undefined;
+  private bannerTimer: number | undefined;
 
   constructor(options: HudOptions) {
     this.i18n = options.i18n;
@@ -73,14 +74,29 @@ export class Hud {
     element('death-xp').textContent = this.i18n.t('death.xpLost', { count: amount });
   }
 
-  /** `level` is null in a safe zone, where there is nothing to fight. */
-  setZone(zone: string, level: number | null, monsters: number): void {
-    const { i18n } = this;
-    element('zone').textContent = level === null ? i18n.t('hud.zoneSafe', { zone }) : i18n.t('hud.zoneLevel', { zone, level });
+  /** `danger` is the line describing the region's monsters; `monsters` is null where they are not counted. */
+  setZone(zone: string, danger: string, monsters: number | null): void {
+    element('zone').textContent = this.i18n.t('hud.zone', { zone, danger });
     const label = element('monsters');
-    label.hidden = level === null;
-    label.textContent = i18n.t('hud.monsters', { count: monsters });
-    label.classList.toggle('cleared', monsters === 0);
+    label.hidden = monsters === null;
+    if (monsters !== null) {
+      label.textContent = this.i18n.t('hud.monsters', { count: monsters });
+      label.classList.toggle('cleared', monsters === 0);
+    }
+  }
+
+  /** Announces that the hero has entered a region: its name in large letters for a few seconds. */
+  showBanner(zone: string, danger: string): void {
+    const banner = element('banner');
+    element('banner-title').textContent = zone;
+    element('banner-detail').textContent = danger;
+    banner.hidden = false;
+    // Restart the fade animation even if the banner is already on screen.
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    window.clearTimeout(this.bannerTimer);
+    this.bannerTimer = window.setTimeout(() => (banner.hidden = true), 3500);
   }
 
   /** A one-line reminder of what the interaction key does here; null hides it. */

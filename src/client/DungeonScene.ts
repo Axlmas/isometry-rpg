@@ -2,13 +2,13 @@ import Phaser from 'phaser';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type SkillId, type World, type ZoneKind,
   ITEMS, PLAYER_ATTACK_ARC, SKILLS, SKILL_IDS, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
-  isAlive, isMoving, isWalkable, step, tileAt,
+  isAlive, isMoving, isRoad, isWalkable, regionAt, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
 import { QUICK_KEYS } from './quickBar';
 import { SKILL_KEYS } from './skillText';
-import { EXIT_COLOR, ZONE_LOOK } from './zoneText';
+import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
 
 const WALL_HEIGHT = 30;
 const HALF_W = TILE_WIDTH / 2;
@@ -90,6 +90,9 @@ export class DungeonScene extends Phaser.Scene {
   private holdTimer = 0;
   private peaceful = false;
   private mapObjects: Phaser.GameObjects.GameObject[] = [];
+  private floorTextures: string[] = [];
+  /** For each obstacle picture: where the tile centre sits, as a share of the picture's height. */
+  private readonly obstacleOrigins = new Map<string, number>();
   private readonly monsterSprites = new Map<number, MonsterSprite>();
   private readonly lootSprites = new Map<number, Phaser.GameObjects.Graphics>();
   private hero!: Phaser.GameObjects.Container;
@@ -182,10 +185,10 @@ export class DungeonScene extends Phaser.Scene {
     this.heldKeys.clear();
     this.marker.setVisible(false);
     for (const object of this.mapObjects) object.destroy();
-    this.cameras.main.setBackgroundColor(ZONE_LOOK[world.zone].background);
+    this.cameras.main.setBackgroundColor(world.zone === 'dungeon' ? 0x12141a : 0x16201a);
     this.mapObjects = this.drawMap();
     if (world.merchant) this.mapObjects.push(this.drawMerchant(world.merchant));
-    for (const exit of world.exits) this.mapObjects.push(this.drawExit(exit.pos, EXIT_COLOR[exit.to]));
+    for (const exit of world.exits) this.mapObjects.push(this.drawExit(exit.pos, EXIT_COLOR[exit.leadsTo]));
     for (const sprite of this.monsterSprites.values()) sprite.container.destroy();
     this.monsterSprites.clear();
     this.syncMonsters(1);
@@ -438,7 +441,7 @@ export class DungeonScene extends Phaser.Scene {
         return true;
       case 'playerRespawned':
         this.events_.onRespawn();
-        return false; // The new zone is saved by whoever builds it.
+        return false; // Saved by whoever handles the respawn.
       case 'travel':
         this.events_.onTravel(event.to);
         return false;
@@ -557,6 +560,13 @@ export class DungeonScene extends Phaser.Scene {
     g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 30, 14);
     // The warning before a blow: the monster turns bright and a ring appears under it.
     if (windingUp) g.lineStyle(3, 0xffb347, 1).strokeEllipse(0, 0, 44, 22);
+    if (kind === 'boar') {
+      // Broad and dark, with pale tusks.
+      g.fillStyle(windingUp ? 0xd8663a : 0x5b4636).fillEllipse(0, -13, 38, 22);
+      g.fillStyle(windingUp ? 0xd8663a : 0x6e5744).fillEllipse(13, -13, 16, 14);
+      g.fillStyle(0xf4e9c8).fillTriangle(15, -9, 21, -15, 18, -8).fillCircle(13, -17, 1.8);
+      return;
+    }
     if (kind === 'wolf') {
       // Low and long, with pointed ears.
       g.fillStyle(windingUp ? 0xd8663a : 0x8a8f99).fillEllipse(0, -11, 34, 16);
@@ -669,41 +679,105 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Draws the map. The ground is baked into a few large pictures and every
+   * obstacle is a small ready-made picture, because a world of thousands of
+   * tiles drawn shape by shape on every frame would be far too slow.
+   */
   private drawMap(): Phaser.GameObjects.GameObject[] {
     const { map, zone } = this.world;
-    const look = ZONE_LOOK[zone];
     const objects: Phaser.GameObjects.GameObject[] = [];
-    const floor = this.add.graphics().setDepth(-1000);
-    objects.push(floor);
-    const roadRow = Math.floor(map.height / 2);
+    this.ensureObstacleTextures();
+    for (const key of this.floorTextures) this.textures.remove(key);
+    this.floorTextures = [];
+
+    const CHUNK = 20;
+    for (let cy = 0; cy < map.height; cy += CHUNK) {
+      for (let cx = 0; cx < map.width; cx += CHUNK) {
+        const w = Math.min(CHUNK, map.width - cx);
+        const h = Math.min(CHUNK, map.height - cy);
+        // The corner of the smallest screen rectangle that holds this chunk's tiles.
+        const minX = (cx - (cy + h - 1)) * HALF_W - HALF_W;
+        const maxX = (cx + w - 1 - cy) * HALF_W + HALF_W;
+        const minY = (cx + cy) * HALF_H - HALF_H;
+        const maxY = (cx + w - 1 + cy + h - 1) * HALF_H + HALF_H;
+        const brush = this.make.graphics({}, false);
+        for (let y = cy; y < cy + h; y++) {
+          for (let x = cx; x < cx + w; x++) {
+            const look = REGION_LOOK[regionAt(zone, { x, y }).id];
+            const isWall = tileAt(map, x, y) === TILE_WALL;
+            // Trees stand on grass, so the ground is drawn under them too.
+            if (isWall && look.walls !== 'trees') continue;
+            const c = tileToScreen(x, y);
+            const px = c.x - minX;
+            const py = c.y - minY;
+            // Cosmetic variation only; it does not come from the game's RNG.
+            const shade = ((x * 7 + y * 13) % 5) * 2;
+            const base = !isWall && isRoad(zone, x, y) ? ROAD_COLOR : look.floor;
+            const diamond = [{ x: px, y: py - HALF_H }, { x: px + HALF_W, y: py }, { x: px, y: py + HALF_H }, { x: px - HALF_W, y: py }];
+            brush.fillStyle(Phaser.Display.Color.GetColor(base[0] + shade, base[1] + shade, base[2] + shade));
+            brush.fillPoints(diamond, true);
+            brush.lineStyle(1, look.grid, 0.5);
+            brush.strokePoints(diamond, true, true);
+          }
+        }
+        const key = `floor-${cx}-${cy}`;
+        brush.generateTexture(key, maxX - minX, maxY - minY);
+        brush.destroy();
+        this.floorTextures.push(key);
+        objects.push(this.add.image(minX, minY, key).setOrigin(0).setDepth(-1000));
+      }
+    }
 
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
+        if (tileAt(map, x, y) !== TILE_WALL) continue;
+        const walls = REGION_LOOK[regionAt(zone, { x, y }).id].walls;
+        let key: string;
+        if (walls === 'trees') key = `tree${(x * 31 + y * 17) % 3}`;
+        else if (walls === 'stone') key = 'stone';
+        // The outer ring of the village is the palisade; walls inside it are houses.
+        else key = this.touchesAnotherRegion(x, y) ? 'palisade' : 'house';
         const c = tileToScreen(x, y);
-        const border = x === 0 || y === 0 || x === map.width - 1 || y === map.height - 1;
-        const isWall = tileAt(map, x, y) === TILE_WALL;
-        // Trees stand on grass, so the ground is drawn under them too.
-        if (!isWall || look.walls === 'trees') {
-          // Cosmetic variation only; it does not come from the game's RNG.
-          const shade = ((x * 7 + y * 13) % 5) * 2;
-          const base = look.road && y === roadRow && !isWall ? look.road : look.floor;
-          const diamond = [{ x: c.x, y: c.y - HALF_H }, { x: c.x + HALF_W, y: c.y }, { x: c.x, y: c.y + HALF_H }, { x: c.x - HALF_W, y: c.y }];
-          floor.fillStyle(Phaser.Display.Color.GetColor(base[0] + shade, base[1] + shade, base[2] + shade));
-          floor.fillPoints(diamond, true);
-          floor.lineStyle(1, look.grid, 0.5);
-          floor.strokePoints(diamond, true, true);
-        }
-        if (!isWall) continue;
-
-        const wall = this.add.graphics().setDepth(x + y);
-        if (look.walls === 'trees') this.drawTree(wall, c, (x * 31 + y * 17) % 3);
-        else if (look.walls === 'wood' && !border) this.drawBlock(wall, c, 44, 0x8c7a5e, 0x6f6049, 0xa34a3a); // a house with a red roof
-        else if (look.walls === 'wood') this.drawBlock(wall, c, 34, 0x6b4a2a, 0x4f361e, 0x86603a); // the palisade
-        else this.drawBlock(wall, c, WALL_HEIGHT, 0x4a4038, 0x362e28, 0x6b5d50);
-        objects.push(wall);
+        const origin = this.obstacleOrigins.get(key) as number;
+        objects.push(this.add.image(c.x, c.y, key).setOrigin(0.5, origin).setDepth(x + y));
       }
     }
     return objects;
+  }
+
+  private touchesAnotherRegion(x: number, y: number): boolean {
+    const { zone } = this.world;
+    const here = regionAt(zone, { x, y });
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (regionAt(zone, { x: x + dx, y: y + dy }) !== here) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Paints each kind of obstacle once into a small picture that is then reused for every tile. */
+  private ensureObstacleTextures(): void {
+    if (this.obstacleOrigins.size > 0) return;
+    const block = (key: string, height: number, left: number, right: number, top: number) => {
+      const brush = this.make.graphics({}, false);
+      this.drawBlock(brush, { x: HALF_W, y: height + HALF_H }, height, left, right, top);
+      brush.generateTexture(key, TILE_WIDTH, height + TILE_HEIGHT);
+      brush.destroy();
+      // Where the centre of the tile is inside the picture, as a share of its height.
+      this.obstacleOrigins.set(key, (height + HALF_H) / (height + TILE_HEIGHT));
+    };
+    block('stone', WALL_HEIGHT, 0x4a4038, 0x362e28, 0x6b5d50);
+    block('palisade', 34, 0x6b4a2a, 0x4f361e, 0x86603a);
+    block('house', 44, 0x8c7a5e, 0x6f6049, 0xa34a3a); // a red roof
+    for (let variant = 0; variant < 3; variant++) {
+      const brush = this.make.graphics({}, false);
+      this.drawTree(brush, { x: 32, y: 68 }, variant);
+      brush.generateTexture(`tree${variant}`, 64, 80);
+      brush.destroy();
+      this.obstacleOrigins.set(`tree${variant}`, 68 / 80);
+    }
   }
 
   /** A box standing on a tile: left face, right face and top, each in its own colour. */

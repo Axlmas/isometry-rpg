@@ -95,3 +95,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 .item-price { color: #f2c94c; font-size: 13px; white-space: nowrap; }
 #prompt { position: fixed; inset-block-end: 84px; inset-inline: 0; margin-inline: auto; inline-size: fit-content;
   background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+
+/* Region banner */
+#banner { position: fixed; inset-block-start: 14%; inset-inline: 0; margin-inline: auto; inline-size: fit-content; text-align: center;
+  pointer-events: none; text-shadow: 0 2px 6px #000, 0 0 2px #000; opacity: 0; }
+#banner.show { animation: banner 3.5s ease-out forwards; }
+#banner-title { font-size: 34px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); }
+#banner-detail { font-size: 16px; }
+@keyframes banner { 0% { opacity: 0; transform: translateY(8px); } 12% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #banner.show { animation: none; opacity: 1; } }

@@ -23,8 +23,10 @@
   "shop.noValue": "Shown instead of a price next to a bag item the merchant refuses to buy.",
   "log.noneLeft": "{item} is a potion name in dictionary form. Phrase the message so that form fits.",
   "item.chargePlain": "A consumable that strengthens weapon blows. The grade in brackets says which weapons it fits.",
-  "hud.zoneLevel": "{zone} is the name of the place; {level} is how strong its monsters are.",
-  "zone.village": "Names of places in the game's own world. Translate the meaning (a quiet ford, a heather moor, old mines), do not transliterate.",
+  "zone.village": "Names of places in the game's own world. Translate the meaning (a quiet ford, a heather moor, a hollow with boars, old mines), do not transliterate.",
   "prompt.travel": "{zone} is a place name in dictionary form. Phrase the message so that form fits.",
-  "prompt.trade": "Appears when the hero stands next to the merchant. T is a physical key."
+  "prompt.trade": "Appears when the hero stands next to the merchant. T is a physical key.",
+  "hud.zone": "{zone} is a region name and {danger} one of the zone.safe / zone.level / zone.levels phrases. Only the separator may change.",
+  "zone.safe": "Follows a region name after a dot ('Stillford · a safe place') and stands alone under it on the big banner, so it starts lower-case.",
+  "zone.levels": "Same position as zone.safe. {min} and {max} are the levels of the monsters that live in the region."
 }
