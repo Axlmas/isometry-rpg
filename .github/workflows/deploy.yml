@@ -1,8 +1,14 @@
+# Builds main at the site root and every other branch under /preview/<branch>/,
+# then deploys everything to GitHub Pages in one go.
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
+  delete:
+  workflow_run:
+    workflows: [Preview trigger]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -21,24 +27,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
-        if: hashFiles('package.json') != ''
         with:
           node-version: 22
-          cache: npm
 
-      - name: Build
-        run: |
-          if [ -f package.json ]; then
-            npm ci
-            npm run build
-          else
-            mkdir -p dist
-            cp index.html dist/
-          fi
+      - name: Build site (main + branch previews)
+        env:
+          TRIGGER_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+        run: bash .github/scripts/build-site.sh _site
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: _site
 
   deploy:
     needs: build

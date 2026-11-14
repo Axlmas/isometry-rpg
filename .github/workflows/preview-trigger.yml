@@ -1,0 +1,20 @@
+# Pushes to feature branches start this tiny workflow; its completion triggers
+# deploy.yml via workflow_run. That deploy runs in the context of main, which is
+# the only branch the github-pages environment allows to deploy.
+name: Preview trigger
+
+on:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Announce
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: echo "Branch $BRANCH updated; the deploy workflow will rebuild previews."
