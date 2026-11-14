@@ -91,20 +91,42 @@ describe('save', () => {
     }
   });
 
-  it('remembers which zone the hero is in', () => {
-    for (const zone of ['village', 'field', 'dungeon'] as const) {
-      const world = createWorld(31337, undefined, undefined, zone);
-      const loaded = parseSave(serializeWorld(world));
-      expect(loaded.status).toBe('ok');
-      if (loaded.status !== 'ok') continue;
-      expect(loaded.world.zone).toBe(zone);
-      expect(loaded.world.map).toEqual(world.map);
-      expect(loaded.world.monsters).toEqual(world.monsters);
-    }
+  it('remembers which map the hero is on and where', () => {
+    const dungeon = createWorld(31337, undefined, 4, 'dungeon');
+    dungeon.monsters = dungeon.monsters.filter((m) => m.id !== 3);
+    const loadedDungeon = parseSave(serializeWorld(dungeon));
+    expect(loadedDungeon.status === 'ok' && loadedDungeon.world).toMatchObject({ zone: 'dungeon', dungeonLevel: 4, map: dungeon.map });
+    expect(loadedDungeon.status === 'ok' && loadedDungeon.world.monsters.map((m) => m.id)).toEqual([0, 1, 2, 4, 5, 6, 7, 8]);
+
+    const overworld = createWorld(31337, undefined, undefined, 'overworld');
+    overworld.player.pos = { x: 45.5, y: 29.25 }; // on the road, out on the moor
+    overworld.monsters = overworld.monsters.slice(3); // killed monsters come back, so they are not remembered
+    const loaded = parseSave(serializeWorld(overworld));
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+    expect(loaded.world.zone).toBe('overworld');
+    expect(loaded.world.player.pos).toEqual({ x: 45.5, y: 29.25 });
+    expect(loaded.world.monsters).toHaveLength(overworld.monsterTotal);
+
     const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
-    for (const zone of ['castle', null, 3, undefined]) {
+    for (const zone of ['village', 'field', 'castle', null, 3, undefined]) {
       expect(parseSave(JSON.stringify({ ...good, zone })).status, String(zone)).toBe('damaged');
     }
+  });
+
+  it('moves heroes saved in the old separate village or field into the open-world village', () => {
+    const v7 = { ...(JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>), version: 7 };
+    for (const zone of ['village', 'field']) {
+      const loaded = parseSave(JSON.stringify({ ...v7, zone, x: 3, y: 17, dead: [1, 2], loot: [{ id: 'coal', count: 1, x: 5, y: 17 }] }));
+      expect(loaded.status, zone).toBe('ok');
+      if (loaded.status !== 'ok') continue;
+      const fresh = createWorld(1, undefined, undefined, 'overworld');
+      expect(loaded.world.zone).toBe('overworld');
+      expect(loaded.world.player.pos).toEqual(fresh.spawn);
+      expect(loaded.world.loot).toEqual([]);
+    }
+    const kept = parseSave(JSON.stringify({ ...v7, zone: 'dungeon' }));
+    expect(kept.status === 'ok' && kept.world.zone).toBe('dungeon');
   });
 
   it('rejects saves with impossible progress', () => {

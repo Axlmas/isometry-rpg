@@ -7,15 +7,24 @@
 export const TICK_MS = 50;
 const ticks = (seconds: number): number => Math.round((seconds * 1000) / TICK_MS);
 
-// Zones
+// Maps
+/** The open world is always built from this seed, so its geography is the same for everyone. */
+export const WORLD_SEED = 20261;
+export const WORLD_WIDTH = 100;
+export const WORLD_HEIGHT = 60;
+/** Share of open-world tiles taken by trees. */
+export const WORLD_TREE_CHANCE = 0.06;
+export const MOOR_MONSTERS = 36;
+export const HOLLOW_MONSTERS = 30;
 export const DUNGEON_SIZE = 24;
 /** Share of dungeon tiles that are pillars. */
 export const PILLAR_CHANCE = 0.1;
-export const FIELD_SIZE = 34;
-/** Share of field tiles taken by trees and rocks. */
-export const FIELD_TREE_CHANCE = 0.07;
+/** The mines are never easier than this, however weak the hero who enters. */
+export const MINES_MIN_LEVEL = 4;
 /** The hero can use an exit while standing this close to it. */
 export const EXIT_RANGE = 1.6;
+/** In a safe region, one point of health and of mana comes back every this many ticks. */
+export const SAFE_REGEN_INTERVAL = ticks(0.1);
 
 // Hero
 /** Tiles per second. */
@@ -62,7 +71,7 @@ export const PLAYER_REGEN_INTERVAL = ticks(0.25);
 
 // Monsters
 /** Kind IDs are stable: saves and rules use them, the client maps them to art. */
-export type MonsterKind = 'grunt' | 'wolf';
+export type MonsterKind = 'grunt' | 'wolf' | 'boar';
 /**
  * How each kind differs from the baseline numbers below: multipliers for
  * health, damage and experience, and its own speed in tiles per second.
@@ -71,8 +80,17 @@ export const MONSTER_KINDS: Readonly<Record<MonsterKind, { hp: number; damage: n
   grunt: { hp: 1, damage: 1, xp: 1, speed: 2.6 },
   // Field beasts are weaker but quicker: a warm-up before the dungeon.
   wolf: { hp: 0.6, damage: 0.7, xp: 0.5, speed: 3.3 },
+  // Slow and tough.
+  boar: { hp: 1.1, damage: 0.9, xp: 0.9, speed: 2.4 },
 };
+/** How many monsters a dungeon holds. */
 export const MONSTER_COUNT = 9;
+/** A dead open-world monster comes back at its place after this long... */
+export const MONSTER_RESPAWN_TIME = ticks(40);
+/** ...but not while the hero stands this close to that place. */
+export const MONSTER_RESPAWN_CLEARANCE = 7;
+/** A monster gives up the chase this far from its place, walks back and heals. */
+export const MONSTER_LEASH = 13;
 /** Monsters are never placed closer than this to the hero's starting point. */
 export const MONSTER_MIN_SPAWN_DISTANCE = 6;
 export const MONSTER_RADIUS = 0.3;

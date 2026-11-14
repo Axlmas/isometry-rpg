@@ -1,6 +1,6 @@
 import {
   CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
-  PLAYER_RADIUS, PLAYER_REGEN_DELAY, PLAYER_REGEN_INTERVAL, PLAYER_SPEED, TICK_MS,
+  PLAYER_RADIUS, PLAYER_REGEN_DELAY, PLAYER_REGEN_INTERVAL, PLAYER_SPEED, SAFE_REGEN_INTERVAL, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
@@ -10,6 +10,7 @@ import { buy, sell, travel } from './shop';
 import { findPath } from './pathfinding';
 import { SKILL_IDS, useSkill } from './skills';
 import type { Command, World } from './world';
+import { regionAt } from './zones';
 
 /** Returns the unit vector for a direction, or null when it is zero or not a number. */
 function normalize(dx: number, dy: number): Point | null {
@@ -60,7 +61,8 @@ function applyCommand(world: World, command: Command): void {
     player.mp = player.maxMp;
     player.attackCooldown = 0;
     player.ticksSinceHurt = 0;
-    resetMonsters(world);
+    // In the open world the monsters simply lose interest; a dungeon is reset.
+    if (world.zone === 'dungeon') resetMonsters(world);
     world.events.push({ type: 'playerRespawned' });
     return;
   }
@@ -199,6 +201,11 @@ export function step(world: World, commands: readonly Command[] = []): void {
 
   if (player.hp > 0) {
     player.ticksSinceHurt += 1;
+    // Resting in a safe place restores the hero quickly.
+    if (regionAt(world.zone, player.pos).safe && world.tick % SAFE_REGEN_INTERVAL === 0) {
+      if (player.hp < player.maxHp) player.hp += 1;
+      if (player.mp < player.maxMp) player.mp += 1;
+    }
     if (
       player.hp < player.maxHp &&
       player.ticksSinceHurt >= PLAYER_REGEN_DELAY &&

@@ -5,9 +5,9 @@ import {
   newCharacter, removeItem, sellPrice, step,
 } from '../src/sim';
 
-function arena(offsets: Array<[number, number]> = [], level = 1, zone: 'dungeon' | 'village' = 'dungeon'): World {
+function arena(offsets: Array<[number, number]> = [], level = 1, zone: 'dungeon' | 'overworld' = 'dungeon'): World {
   const world = createWorld(5, { ...newCharacter('trainingSword'), level }, undefined, zone);
-  if (zone === 'village') return world;
+  if (zone === 'overworld') return world;
   const { map } = world;
   for (let y = 1; y < map.height - 1; y++) {
     for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;
@@ -172,13 +172,13 @@ describe('weapon charges', () => {
 describe('merchant', () => {
   /** A hero standing next to the village merchant. */
   const shop = (): World => {
-    const world = arena([], 1, 'village');
+    const world = arena([], 1, 'overworld');
     world.player.pos = { x: world.merchant!.x + 1, y: world.merchant!.y };
     return world;
   };
 
   it('stands on a free tile in the village', () => {
-    const world = arena([], 1, 'village');
+    const world = arena([], 1, 'overworld');
     expect(circleFree(world.map, world.merchant!, 0.3)).toBe(true);
     expect(isNearMerchant(shop())).toBe(true);
   });

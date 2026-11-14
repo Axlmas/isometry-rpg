@@ -1,7 +1,7 @@
 import {
   MONSTER_AGGRO_RANGE, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
-  MONSTER_KINDS, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
+  MONSTER_KINDS, MONSTER_LEASH, MONSTER_RESPAWN_CLEARANCE, MONSTER_RESPAWN_TIME, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
@@ -14,6 +14,7 @@ import { findPath } from './pathfinding';
 import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterXp } from './progression';
 import { createRng } from './rng';
 import type { Monster, PendingAttack, World } from './world';
+import { regionAt } from './zones';
 
 /** Rolls an integer in [min, max] from the world's own random sequence. */
 function roll(world: World, [min, max]: readonly [number, number]): number {
@@ -68,6 +69,7 @@ export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
     const damage = Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * attack.multiplier);
     monster.hp = Math.max(0, monster.hp - damage);
     monster.aggro = true;
+    monster.returning = false;
     monster.windup = 0; // A hit interrupts the monster's own attack.
     if (distance > 0) {
       monster.pos = pushOutOfWalls(
@@ -79,7 +81,13 @@ export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
     world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
     if (monster.hp === 0) {
       dropMonsterLoot(world, monster.pos);
-      xp += monsterXp(world.dungeonLevel, monster.kind);
+      xp += monsterXp(monster.level, monster.kind);
+    }
+  }
+  // In the open world the dead come back after a while; a dungeon stays cleared.
+  if (world.zone === 'overworld') {
+    for (const monster of world.monsters) {
+      if (monster.hp === 0) world.respawns.push({ ticks: MONSTER_RESPAWN_TIME, monster });
     }
   }
   world.monsters = world.monsters.filter((monster) => monster.hp > 0);
@@ -102,37 +110,51 @@ function hurtPlayer(world: World, rawDamage: number): void {
   }
 }
 
-function chase(world: World, monster: Monster, distance: number): void {
-  const { player, map } = world;
-  let target: Point = player.pos;
-  if (clearLine(map, monster.pos, player.pos, MONSTER_RADIUS)) {
+/** How many tiles a monster may examine when looking for a way around walls. */
+const MONSTER_PATH_BUDGET = 500;
+
+/**
+ * Moves a monster one tick towards `target`: straight if nothing is in the
+ * way, otherwise around walls. Stops `stopAt` short of the target.
+ */
+function walkTowards(world: World, monster: Monster, target: Point, stopAt: number): void {
+  const { map } = world;
+  let aim = target;
+  if (clearLine(map, monster.pos, target, MONSTER_RADIUS)) {
     monster.waypoint = null;
   } else {
     // Monsters take turns re-planning so the cost is spread over several ticks.
     if (monster.waypoint === null || (world.tick + monster.id) % MONSTER_REPATH_INTERVAL === 0) {
       const from = { x: Math.round(monster.pos.x), y: Math.round(monster.pos.y) };
-      const to = { x: Math.round(player.pos.x), y: Math.round(player.pos.y) };
-      monster.waypoint = findPath(map, from, to)?.[0] ?? null;
+      const to = { x: Math.round(target.x), y: Math.round(target.y) };
+      monster.waypoint = findPath(map, from, to, MONSTER_PATH_BUDGET)?.[0] ?? null;
     }
     if (monster.waypoint === null) return;
-    target = monster.waypoint;
+    aim = monster.waypoint;
   }
 
-  const dx = target.x - monster.pos.x;
-  const dy = target.y - monster.pos.y;
-  const toTarget = Math.hypot(dx, dy);
-  // Stop just short of the hero instead of walking into them.
-  const stopAt = target === player.pos ? MONSTER_ATTACK_START * 0.85 : 0;
-  const move = Math.min((MONSTER_KINDS[monster.kind].speed * TICK_MS) / 1000, Math.max(0, (target === player.pos ? distance : toTarget) - stopAt));
-  if (toTarget === 0 || move <= 0) {
-    if (target !== player.pos) monster.waypoint = null;
+  const dx = aim.x - monster.pos.x;
+  const dy = aim.y - monster.pos.y;
+  const toAim = Math.hypot(dx, dy);
+  const reach = aim === target ? Math.max(0, toAim - stopAt) : toAim;
+  const move = Math.min((MONSTER_KINDS[monster.kind].speed * TICK_MS) / 1000, reach);
+  if (toAim === 0 || move <= 0) {
+    if (aim !== target) monster.waypoint = null;
     return;
   }
   monster.pos = pushOutOfWalls(
     map,
-    { x: monster.pos.x + (dx / toTarget) * move, y: monster.pos.y + (dy / toTarget) * move },
+    { x: monster.pos.x + (dx / toAim) * move, y: monster.pos.y + (dy / toAim) * move },
     MONSTER_RADIUS,
   );
+}
+
+/** Makes a monster forget the hero and head home. */
+function giveUp(monster: Monster): void {
+  monster.aggro = false;
+  monster.returning = true;
+  monster.windup = 0;
+  monster.waypoint = null;
 }
 
 /** Keeps monsters from standing inside each other or inside the hero. */
@@ -159,40 +181,91 @@ function separate(world: World): void {
     const dy = monster.pos.y - player.pos.y;
     const distance = Math.hypot(dx, dy);
     const overlap = MONSTER_RADIUS + PLAYER_RADIUS - distance;
-    if (overlap > 0 && distance > 0) {
+    // A monster walking home passes through the hero; otherwise standing in its way would trap it.
+    if (overlap > 0 && distance > 0 && !monster.returning) {
       monster.pos = { x: monster.pos.x + (dx / distance) * overlap, y: monster.pos.y + (dy / distance) * overlap };
     }
     monster.pos = pushOutOfWalls(map, monster.pos, MONSTER_RADIUS);
   }
 }
 
-/** Advances every monster by one tick: notice the hero, chase, attack. */
-export function updateMonsters(world: World): void {
+/** Brings back dead open-world monsters whose time has come. */
+function respawnMonsters(world: World): void {
+  if (world.respawns.length === 0) return;
   const { player } = world;
-  const heroAlive = player.hp > 0;
-  for (const monster of world.monsters) {
-    if (monster.cooldown > 0) monster.cooldown -= 1;
-    if (!heroAlive) {
-      monster.aggro = false;
-      monster.windup = 0;
+  const waiting: World['respawns'] = [];
+  for (const entry of world.respawns) {
+    entry.ticks -= 1;
+    const { monster } = entry;
+    const heroNear = Math.hypot(player.pos.x - monster.home.x, player.pos.y - monster.home.y) < MONSTER_RESPAWN_CLEARANCE;
+    if (entry.ticks > 0 || heroNear) {
+      waiting.push(entry);
       continue;
     }
+    world.monsters.push({
+      ...monster,
+      pos: { ...monster.home },
+      hp: monster.maxHp,
+      aggro: false,
+      returning: false,
+      windup: 0,
+      cooldown: 0,
+      waypoint: null,
+    });
+  }
+  if (waiting.length === world.respawns.length) return;
+  world.respawns = waiting;
+  // Keep the list ordered by id, as the rest of the rules expect.
+  world.monsters.sort((a, b) => a.id - b.id);
+}
+
+/** Advances every monster by one tick: notice the hero, chase, attack, give up, come back. */
+export function updateMonsters(world: World): void {
+  const { player } = world;
+  respawnMonsters(world);
+  // Nobody is hunted in a safe place, and the dead are left alone.
+  const heroIsPrey = player.hp > 0 && !regionAt(world.zone, player.pos).safe;
+  for (const monster of world.monsters) {
+    if (monster.cooldown > 0) monster.cooldown -= 1;
+
+    if (monster.returning) {
+      const fromHome = Math.hypot(monster.home.x - monster.pos.x, monster.home.y - monster.pos.y);
+      if (fromHome < 0.3) {
+        monster.returning = false;
+        monster.waypoint = null;
+        monster.hp = monster.maxHp; // A monster that got away is fresh again.
+      } else {
+        walkTowards(world, monster, monster.home, 0);
+      }
+      continue;
+    }
+    if (!heroIsPrey) {
+      if (monster.aggro) giveUp(monster);
+      continue;
+    }
+
     const distance = Math.hypot(player.pos.x - monster.pos.x, player.pos.y - monster.pos.y);
     if (!monster.aggro && distance <= MONSTER_AGGRO_RANGE) monster.aggro = true;
     if (!monster.aggro) continue;
+    // The leash only matters in the open world; in a dungeon there is nowhere to run.
+    if (world.zone === 'overworld' && Math.hypot(monster.home.x - monster.pos.x, monster.home.y - monster.pos.y) > MONSTER_LEASH) {
+      giveUp(monster);
+      continue;
+    }
 
     if (monster.windup > 0) {
       // The monster stands still while it prepares the blow.
       monster.windup -= 1;
       if (monster.windup === 0) {
         monster.cooldown = MONSTER_ATTACK_COOLDOWN;
-        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(world.dungeonLevel, monster.kind)));
+        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(monster.level, monster.kind)));
       }
     } else if (distance <= MONSTER_ATTACK_START && monster.cooldown === 0) {
       monster.windup = MONSTER_ATTACK_WINDUP;
       world.events.push({ type: 'monsterWindup', id: monster.id });
     } else {
-      chase(world, monster, distance);
+      // Stop just short of the hero instead of walking into them.
+      walkTowards(world, monster, player.pos, MONSTER_ATTACK_START * 0.85);
     }
   }
   separate(world);
@@ -204,6 +277,7 @@ export function resetMonsters(world: World): void {
     monster.pos = { ...monster.home };
     monster.hp = monster.maxHp;
     monster.aggro = false;
+    monster.returning = false;
     monster.windup = 0;
     monster.cooldown = 0;
     monster.waypoint = null;

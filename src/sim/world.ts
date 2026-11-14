@@ -1,5 +1,5 @@
-import { MAX_LEVEL, MONSTER_COUNT, MONSTER_MIN_SPAWN_DISTANCE, type MonsterKind } from './balance';
-import { type GridMap, type Point, isWalkable } from './grid';
+import { MAX_LEVEL, type MonsterKind, WORLD_SEED } from './balance';
+import type { GridMap, Point } from './grid';
 import { type Character, type ItemStack, newCharacter } from './inventory';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
 import { maxHpAtLevel, maxMpAtLevel, monsterMaxHp } from './progression';
@@ -74,13 +74,17 @@ export interface Monster {
   /** Stable within a dungeon: the same seed always gives the same monsters. */
   id: number;
   kind: MonsterKind;
-  /** Where the monster was placed; it returns here when the hero dies. */
+  /** Sets its health, damage and the experience it gives. */
+  level: number;
+  /** Where the monster lives; it returns here when it loses the hero, and comes back here after dying. */
   home: Point;
   pos: Point;
   hp: number;
   maxHp: number;
   /** True once the monster has noticed the hero. */
   aggro: boolean;
+  /** True while it walks back home after giving up a chase; it ignores the hero until it arrives. */
+  returning: boolean;
   /** Ticks until the started blow lands; zero when not attacking. */
   windup: number;
   cooldown: number;
@@ -133,7 +137,9 @@ export interface World {
   monsters: Monster[];
   /** How many monsters this zone started with. */
   monsterTotal: number;
-  /** Level of the zone: sets how strong its monsters are and how much experience they give. */
+  /** Dead open-world monsters waiting to come back, with the ticks left. Dungeon monsters stay dead. */
+  respawns: Array<{ ticks: number; monster: Monster }>;
+  /** Level of a dungeon's monsters. Open-world monsters have the level of their region instead. */
   dungeonLevel: number;
   /** Items on the floor, ordered by id. */
   loot: GroundLoot[];
@@ -176,10 +182,10 @@ function carried(value: number | undefined, min: number, max: number): number {
 }
 
 /**
- * Builds a zone from a seed. Pass the hero's belongings to carry them over;
- * without them a new hero is created. The zone is as strong as the hero
- * entering it unless a level is given. `from` places the hero at the exit
- * that leads back to the zone they came from.
+ * Builds a map. Pass the hero's belongings to carry them over; without them
+ * a new hero is created. `dungeonLevel` sets the level of a dungeon's monsters
+ * (open-world monsters have the level of their region). `from` places the
+ * hero at the exit that leads back to the map they came from.
  */
 export function createWorld(
   seed: number,
@@ -190,39 +196,29 @@ export function createWorld(
 ): World {
   const level = Math.min(MAX_LEVEL, Math.max(1, Math.floor(character.level)));
   const rng = createRng(seed >>> 0);
-  const layout = buildZone(zone, rng);
-  const { map, spawn, monsterKind } = layout;
-  const { width, height } = map;
+  // The open world's geography never changes; only a dungeon is shaped by the seed.
+  const layout = buildZone(zone, zone === 'overworld' ? createRng(WORLD_SEED) : rng);
+  const { map, spawn } = layout;
   const arrival = layout.exits.find((exit) => exit.to === from)?.pos ?? spawn;
 
-  // Monsters stand on distinct floor tiles away from where the hero arrives.
-  const candidates: Point[] = [];
-  if (monsterKind !== null) {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const far = [spawn, arrival].every((p) => Math.hypot(x - p.x, y - p.y) >= MONSTER_MIN_SPAWN_DISTANCE);
-        if (isWalkable(map, x, y) && far) candidates.push({ x, y });
-      }
-    }
-  }
-  const kind: MonsterKind = monsterKind ?? 'grunt';
-  const monsterHp = monsterMaxHp(dungeonLevel, kind);
-  const monsters: Monster[] = [];
-  while (monsters.length < MONSTER_COUNT && candidates.length > 0) {
-    const [home] = candidates.splice(rng.int(0, candidates.length - 1), 1) as [Point];
-    monsters.push({
-      id: monsters.length,
-      kind,
-      home,
-      pos: { ...home },
-      hp: monsterHp,
-      maxHp: monsterHp,
+  const monsters: Monster[] = layout.monsters.map((spot, id) => {
+    const monsterLevel = spot.level ?? dungeonLevel;
+    const hp = monsterMaxHp(monsterLevel, spot.kind);
+    return {
+      id,
+      kind: spot.kind,
+      level: monsterLevel,
+      home: spot.home,
+      pos: { ...spot.home },
+      hp,
+      maxHp: hp,
       aggro: false,
+      returning: false,
       windup: 0,
       cooldown: 0,
       waypoint: null,
-    });
-  }
+    };
+  });
 
   return {
     seed: seed >>> 0,
@@ -259,6 +255,7 @@ export function createWorld(
     },
     monsters,
     monsterTotal: monsters.length,
+    respawns: [],
     dungeonLevel,
     loot: [],
     nextLootId: 0,
