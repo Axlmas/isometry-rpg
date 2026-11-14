@@ -1,0 +1,11 @@
+{
+  // The game rules must not depend on the browser or the renderer.
+  // Compiling src/sim without the DOM library and without ambient types
+  // makes any such dependency a type error.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/sim"]
+}
