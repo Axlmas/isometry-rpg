@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type GridMap, type Tile, TICK_MS, PLAYER_RADIUS, PLAYER_SPEED, TILE_FLOOR, TILE_WALL,
   circleFree, clearLine, pushOutOfWalls,
-  createRng, createWorld, findPath, isMoving, isWalkable, step, tileAt,
+  createRng, createWorld as createWorldWithMonsters, findPath, isMoving, isWalkable, step, tileAt,
 } from '../src/sim';
 
 function mapFrom(rows: string[]): GridMap {
@@ -89,8 +89,15 @@ describe('findPath', () => {
 });
 
 describe('world', () => {
+  // These tests are about movement; monsters are covered in combat.test.ts.
+  const createWorld = (seed: number) => {
+    const world = createWorldWithMonsters(seed);
+    world.monsters = [];
+    return world;
+  };
+
   it('builds the same dungeon from the same seed', () => {
-    expect(createWorld(123).map).toEqual(createWorld(123).map);
+    expect(createWorld(123)).toEqual(createWorld(123));
     expect(createWorld(123).map.tiles).not.toEqual(createWorld(124).map.tiles);
   });
 

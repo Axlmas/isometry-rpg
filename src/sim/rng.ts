@@ -9,6 +9,8 @@ export interface Rng {
   next(): number;
   /** Returns an integer in [min, max], both inclusive. */
   int(min: number, max: number): number;
+  /** The internal state; pass it to `createRng` to continue the same sequence. */
+  readonly state: number;
 }
 
 export function createRng(seed: number): Rng {
@@ -23,5 +25,8 @@ export function createRng(seed: number): Rng {
   return {
     next,
     int: (min, max) => min + Math.floor(next() * (max - min + 1)),
+    get state() {
+      return state;
+    },
   };
 }
