@@ -27,7 +27,7 @@
 ## Правила
 
 - **Ключи:** `раздел.имя` в camelCase, например `hud.newDungeon`, `confirm.newDungeon.yes`.
-  Раздел — место в интерфейсе (`hud`, `inventory`, `log`, `confirm`, `toast`, `death`,
+  Раздел — место в интерфейсе (`hud`, `quick`, `skills`, `inventory`, `shop`, `log`, `confirm`, `toast`, `death`,
   `error`) или вид данных (`item`, `slot`, `grade`, `skill`, `skillInfo`), не тип элемента.
   Ключ описывает смысл, а не текст.
 - **В коде** ключ всегда пишется строковым литералом: `i18n.t('hud.hint')`,
