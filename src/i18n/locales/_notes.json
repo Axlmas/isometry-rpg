@@ -18,5 +18,12 @@
   "hud.dungeonLevel": "How strong the monsters of the current dungeon are. Followed by the monster count on the same line.",
   "skills.cooldown": "Shown on a small skill button. {seconds} is whole seconds; 's' is the abbreviation for seconds.",
   "skills.locked": "Shown on a skill button the hero cannot use yet. Keep it very short.",
-  "skillInfo.heavyBlow": "All skillInfo.* texts are tooltips: one sentence saying what the skill does, no numbers."
+  "skillInfo.heavyBlow": "All skillInfo.* texts are tooltips: one sentence saying what the skill does, no numbers.",
+  "quick.on": "State of the weapon-charges switch on a small button, followed by how many charges are left. Abbreviate if needed.",
+  "inventory.use": "Button next to a potion in the bag.",
+  "shop.buyMany": "Button that buys several at once; {count} is 10 or 100.",
+  "shop.noValue": "Shown instead of a price next to a bag item the merchant refuses to buy.",
+  "shop.prompt": "Appears when the hero stands next to the merchant. T is a physical key.",
+  "log.noneLeft": "{item} is a potion name in dictionary form. Phrase the message so that form fits.",
+  "item.chargePlain": "A consumable that strengthens weapon blows. The grade in brackets says which weapons it fits."
 }

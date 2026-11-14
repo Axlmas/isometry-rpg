@@ -76,6 +76,21 @@ describe('save', () => {
     expect(loaded.world.monsters[0]?.maxHp).toBe(world.monsters[0]?.maxHp);
   });
 
+  it('remembers consumables and whether charges are switched on', () => {
+    const world = createWorld(31337);
+    world.player.inventory = [{ itemId: 'chargePlain', count: 5000 }, { itemId: 'healthPotion', count: 12 }];
+    world.player.chargesOn = true;
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+    expect(loaded.world.player.inventory).toEqual(world.player.inventory);
+    expect(loaded.world.player.chargesOn).toBe(true);
+    const good = JSON.parse(serializeWorld(world)) as Record<string, unknown>;
+    for (const change of [{ chargesOn: 'yes' }, { chargesOn: 1 }, { inventory: [{ id: 'healthPotion', count: 100 }] }, { inventory: [{ id: 'chargeD', count: 10000 }] }]) {
+      expect(parseSave(JSON.stringify({ ...good, ...change })).status, JSON.stringify(change)).toBe('damaged');
+    }
+  });
+
   it('rejects saves with impossible progress', () => {
     const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
     const cases: Array<Record<string, unknown>> = [
@@ -165,6 +180,8 @@ describe('save', () => {
       { version: 3, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null },
       { version: 4, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
         equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [] },
+      { version: 5, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
+        equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [], level: 1, xp: 0, mp: null, dungeonLevel: 1 },
     ]) {
       const loaded = parseSave(JSON.stringify(old));
       expect(loaded.status).toBe('ok');
@@ -177,6 +194,7 @@ describe('save', () => {
       expect(loaded.world.player.inventory).toEqual([]);
       expect(loaded.world.player).toMatchObject({ level: 1, xp: 0, mp: fresh.player.maxMp });
       expect(loaded.world.dungeonLevel).toBe(1);
+      expect(loaded.world.player.chargesOn).toBe(false);
     }
   });
 

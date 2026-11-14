@@ -6,6 +6,7 @@ import {
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
+import { QUICK_KEYS } from './quickBar';
 import { SKILL_KEYS } from './skillText';
 
 const WALL_HEIGHT = 30;
@@ -16,6 +17,8 @@ const HOLD_REPEAT_MS = 120;
 /** Keyboard attacks aim at the nearest monster within this distance. */
 const AUTO_AIM_RANGE = PLAYER_ATTACK_RANGE + 1;
 const EFFECT_DEPTH = 100000;
+/** Colour of a blow strengthened by a weapon charge, and of the blade while charges are on. */
+const CHARGE_COLOR = 0x7fe9ff;
 
 // Physical key positions (KeyboardEvent.code), so controls work on any
 // keyboard layout, including Cyrillic. Values are directions on the screen.
@@ -27,6 +30,13 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
 };
 const ATTACK_KEY = 'Space';
 const INVENTORY_KEY = 'KeyI';
+const SHOP_KEY = 'KeyT';
+/** Keys that send one command when pressed. */
+const COMMAND_KEYS: Record<string, Command> = {
+  [QUICK_KEYS.healthPotion]: { type: 'use', itemId: 'healthPotion' },
+  [QUICK_KEYS.manaPotion]: { type: 'use', itemId: 'manaPotion' },
+  [QUICK_KEYS.charges]: { type: 'toggleCharges' },
+};
 const SKILL_BY_KEY = new Map<string, SkillId>(SKILL_IDS.map((id) => [SKILL_KEYS[id].code, id]));
 
 export interface SceneEvents {
@@ -42,6 +52,9 @@ export interface SceneEvents {
   onPickup(itemId: ItemId, count: number): void;
   onInventoryFull(): void;
   onToggleInventory(): void;
+  onToggleShop(): void;
+  /** Something the player should be told in words: a refusal, a purchase, a sale. */
+  onNotice(event: GameEvent): void;
   /** Formats a number for the player's language. */
   formatNumber(value: number): string;
 }
@@ -99,7 +112,10 @@ export class DungeonScene extends Phaser.Scene {
     // Listening on the window keeps controls working even when a HUD button has focus.
     const onKeyDown = (event: KeyboardEvent) => {
       const skill = SKILL_BY_KEY.get(event.code);
-      const known = event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY || skill !== undefined;
+      const command = COMMAND_KEYS[event.code];
+      const known =
+        event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY ||
+        event.code === SHOP_KEY || skill !== undefined || command !== undefined;
       if (!known || event.ctrlKey || event.metaKey || event.altKey) return;
       if (document.querySelector('dialog[open]')) return; // Keys belong to the dialog.
       if (event.code === INVENTORY_KEY) {
@@ -108,6 +124,14 @@ export class DungeonScene extends Phaser.Scene {
       }
       if (skill !== undefined) {
         if (!event.repeat) this.useSkill(skill, true);
+        return;
+      }
+      if (event.code === SHOP_KEY) {
+        if (!event.repeat) this.events_.onToggleShop();
+        return;
+      }
+      if (command !== undefined) {
+        if (!event.repeat) this.pending.push(command);
         return;
       }
       if (event.code === ATTACK_KEY && event.target instanceof HTMLButtonElement) return; // Space presses the focused button.
@@ -152,6 +176,7 @@ export class DungeonScene extends Phaser.Scene {
     this.marker.setVisible(false);
     for (const object of this.mapObjects) object.destroy();
     this.mapObjects = this.drawMap();
+    this.mapObjects.push(this.drawMerchant());
     for (const sprite of this.monsterSprites.values()) sprite.container.destroy();
     this.monsterSprites.clear();
     this.syncMonsters(1);
@@ -335,11 +360,11 @@ export class DungeonScene extends Phaser.Scene {
   private showEvent(event: GameEvent): boolean {
     switch (event.type) {
       case 'playerSwing':
-        this.showSwing(event.dir, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, 0xffffff);
+        this.showSwing(event.dir, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, event.charged ? CHARGE_COLOR : 0xffffff);
         return false;
       case 'skillUsed': {
         const { effect } = SKILLS[event.id];
-        if (effect.kind === 'strike') this.showSwing(event.dir, effect.arc, effect.range, 0xffb347);
+        if (effect.kind === 'strike') this.showSwing(event.dir, effect.arc, effect.range, event.charged ? CHARGE_COLOR : 0xffb347);
         return false;
       }
       case 'playerHealed':
@@ -354,6 +379,17 @@ export class DungeonScene extends Phaser.Scene {
         return true;
       case 'skillDenied':
         this.events_.onSkillDenied(event.id, event.reason);
+        return false;
+      case 'itemUsed':
+        return true;
+      case 'bought':
+      case 'sold':
+        this.events_.onNotice(event);
+        return true;
+      case 'useDenied':
+      case 'chargesEmpty':
+      case 'tradeDenied':
+        this.events_.onNotice(event);
         return false;
       case 'monsterHit': {
         const at = tileToScreen(event.pos.x, event.pos.y);
@@ -471,12 +507,12 @@ export class DungeonScene extends Phaser.Scene {
 
   /** A blade that points where the hero is facing, so the attack direction is readable. */
   private drawWeapon(): void {
-    const { facing, attackCooldown } = this.world.player;
+    const { facing, attackCooldown, chargesOn } = this.world.player;
     const tip = tileToScreen(facing.x, facing.y);
     const length = Math.hypot(tip.x, tip.y) || 1;
     const reach = attackCooldown > 0 ? 30 : 22;
     this.weapon.clear();
-    this.weapon.lineStyle(4, 0xd9dde6, 1);
+    this.weapon.lineStyle(4, chargesOn ? CHARGE_COLOR : 0xd9dde6, 1);
     this.weapon.lineBetween(0, -20, (tip.x / length) * reach, -20 + (tip.y / length) * reach);
   }
 
@@ -531,6 +567,21 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  private drawMerchant(): Phaser.GameObjects.Graphics {
+    const { merchant } = this.world;
+    const at = tileToScreen(merchant.x, merchant.y);
+    const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(merchant.x + merchant.y);
+    g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 32, 15);
+    g.fillStyle(0x3e7d5a).fillRoundedRect(-11, -36, 22, 34, { tl: 9, tr: 9, bl: 4, br: 4 });
+    g.fillStyle(0x2c5c42).fillRect(-11, -14, 22, 12);
+    g.fillStyle(0xf0d2b0).fillCircle(0, -44, 8);
+    g.fillStyle(0x6b4a2a).fillEllipse(0, -51, 22, 8);
+    // A coin above his head marks him as someone to trade with.
+    g.fillStyle(0xb8862b).fillCircle(0, -66, 7);
+    g.fillStyle(0xf2c94c).fillCircle(0, -67, 6);
+    return g;
+  }
+
   private createLootSprite(loot: GroundLoot): Phaser.GameObjects.Graphics {
     const at = tileToScreen(loot.pos.x, loot.pos.y);
     const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(loot.pos.x + loot.pos.y - 0.2);
@@ -542,6 +593,11 @@ export class DungeonScene extends Phaser.Scene {
     } else if (def.kind === 'material') {
       g.fillStyle(0x8a6a45).fillRoundedRect(-7, -12, 14, 13, 4);
       g.fillStyle(0x5f4830).fillRect(-4, -14, 8, 3);
+    } else if (def.kind === 'consumable') {
+      // A small flask: red for health, blue for mana, pale for charges.
+      const color = def.effect.kind === 'heal' ? 0xd9534f : def.effect.kind === 'mana' ? 0x4f8fe0 : CHARGE_COLOR;
+      g.fillStyle(color).fillCircle(0, -6, 6);
+      g.fillStyle(0xcfd3dc).fillRect(-2, -15, 4, 5);
     } else {
       // Equipment glows in the colour of its grade so it stands out from afar.
       const color = GRADE_COLOR[def.grade];

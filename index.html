@@ -25,12 +25,13 @@
         <button id="new-dungeon" type="button" class="small" data-i18n="hud.newDungeon"></button>
         <button id="language" type="button" class="small"></button>
       </div>
-      <details open>
+      <details id="controls">
         <summary data-i18n="hud.controls"></summary>
         <p id="hint" data-i18n="hud.hint"></p>
       </details>
       <p id="save-status"></p>
     </header>
+    <ul id="log" aria-live="polite"></ul>
   </div>
 
   <aside id="inventory" class="panel" aria-labelledby="inventory-title" hidden>
@@ -45,9 +46,21 @@
     <ul id="inventory-list" class="item-list"></ul>
   </aside>
 
-  <div id="skills" role="toolbar"></div>
+  <aside id="shop" class="panel" aria-labelledby="shop-title" hidden>
+    <div class="panel-head">
+      <h2 id="shop-title" data-i18n="shop.title"></h2>
+      <button id="shop-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="shop-coins"></p>
+    <h3 data-i18n="shop.forSale"></h3>
+    <ul id="shop-stock" class="item-list"></ul>
+    <h3 data-i18n="shop.yourBag"></h3>
+    <p id="shop-empty" class="item-empty" data-i18n="shop.nothingToSell"></p>
+    <ul id="shop-bag" class="item-list"></ul>
+  </aside>
 
-  <ul id="log" aria-live="polite"></ul>
+  <p id="prompt" data-i18n="shop.prompt" hidden></p>
+  <div id="skills" role="toolbar"></div>
 
   <dialog id="confirm-new">
     <h2 data-i18n="confirm.newDungeon.title"></h2>

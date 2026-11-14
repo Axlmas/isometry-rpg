@@ -1,11 +1,11 @@
 import {
   type Character, type EquipSlot, type ItemId, type ItemStack, type World,
   EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
-  characterOf, circleFree, createWorld, isItemId, newCharacter, xpToNextLevel,
+  characterOf, circleFree, createWorld, isItemId, maxStackOf, newCharacter, xpToNextLevel,
 } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -31,6 +31,8 @@ interface SaveData {
   mp: number;
   /** Strength of this dungeon's monsters. */
   dungeonLevel: number;
+  /** Whether weapon charges are switched on. */
+  chargesOn: boolean;
   coins: number;
   inventory: Array<{ id: ItemId; count: number }>;
   equipment: Record<EquipSlot, ItemId | null>;
@@ -75,6 +77,7 @@ export function serializeWorld(world: World): string {
     xp: world.player.xp,
     mp: world.player.mp,
     dungeonLevel: world.dungeonLevel,
+    chargesOn: world.player.chargesOn,
     coins: world.player.coins,
     inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count })),
     equipment: { ...world.player.equipment },
@@ -99,6 +102,8 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
   }
   // v5 added levels and mana: everyone starts at level 1 with full mana (null).
   if (current.version === 4) current = { ...current, version: 5, level: 1, xp: 0, mp: null, dungeonLevel: 1 };
+  // v6 added consumables; weapon charges start switched off.
+  if (current.version === 5) current = { ...current, version: 6, chargesOn: false };
   return current;
 }
 
@@ -112,7 +117,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
   if (!isRecord(value) || !isItemId(value.id) || !isInt(value.count) || value.count < 1) return null;
   const def = ITEMS[value.id];
-  if (def.kind === 'currency' ? !allowCurrency : value.count > (def.kind === 'material' ? def.maxStack : 1)) return null;
+  if (def.kind === 'currency' ? !allowCurrency : value.count > maxStackOf(value.id)) return null;
   return { itemId: value.id, count: value.count };
 }
 
@@ -159,7 +164,8 @@ export function parseSave(raw: string | null): LoadResult {
     }
     const character = parseCharacter(data);
     if (!character) return { status: 'damaged' };
-    const { dungeonLevel, mp } = data;
+    const { dungeonLevel, mp, chargesOn } = data;
+    if (typeof chargesOn !== 'boolean') return { status: 'damaged' };
     if (!isInt(dungeonLevel) || dungeonLevel < 1 || dungeonLevel > MAX_LEVEL) return { status: 'damaged' };
     const world = createWorld(seed, character, dungeonLevel);
     if (mp !== null) {
@@ -199,6 +205,7 @@ export function parseSave(raw: string | null): LoadResult {
     }
 
     world.player.distance = distance;
+    world.player.chargesOn = chargesOn;
     world.player.hp = hp;
     world.monsters = world.monsters.filter((monster) => !dead.includes(monster.id));
     return { status: 'ok', world };

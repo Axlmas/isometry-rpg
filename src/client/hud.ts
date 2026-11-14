@@ -9,6 +9,8 @@ function element<T extends HTMLElement>(id: string): T {
 export interface HudOptions {
   i18n: I18n;
   canSave: boolean;
+  /** Open the controls summary; meant for a player's first launch. */
+  showControls: boolean;
   onLanguageToggle(): void;
   onNewDungeon(): void;
   onRespawn(): void;
@@ -29,6 +31,7 @@ export class Hud {
     this.i18n = options.i18n;
     this.canSave = options.canSave;
 
+    element<HTMLDetailsElement>('controls').open = options.showControls;
     const dialog = element<HTMLDialogElement>('confirm-new');
     element('language').addEventListener('click', options.onLanguageToggle);
     element('new-dungeon').addEventListener('click', () => dialog.showModal());

@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
-import { type World, MAX_LEVEL, SKILLS, createWorld, isAlive, xpToNextLevel } from '../sim';
+import { type GameEvent, type World, MAX_LEVEL, SKILLS, createWorld, isAlive, isNearMerchant, xpToNextLevel } from '../sim';
 import { InventoryPanel } from './inventoryPanel';
-import { ITEM_NAME } from './itemText';
+import { itemName } from './itemView';
+import { QuickBar } from './quickBar';
+import { ShopPanel } from './shopPanel';
 import { DungeonScene } from './DungeonScene';
 import { Hud } from './hud';
 import { characterOf, loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
@@ -36,6 +38,8 @@ function showStats(w: World): void {
   hud.setMana(w.player.mp, w.player.maxMp);
   hud.setProgress(w.player.level, w.player.xp, w.player.level < MAX_LEVEL ? xpToNextLevel(w.player.level) : 0, w.dungeonLevel);
   skillBar.update(w);
+  quickBar.update(w);
+  shop.update(w);
   hud.setMonsters(w.monsters.length);
   hud.setDeathVisible(!isAlive(w));
   inventory.update(w);
@@ -48,7 +52,11 @@ const scene = new DungeonScene(world, {
     hud.setXpLost(xpLost);
     showStats(w);
   },
-  onTick: (w) => skillBar.update(w),
+  onTick: (w) => {
+    skillBar.update(w);
+    quickBar.update(w);
+    shop.update(w);
+  },
   onLevelUp: (level, unlocked) => {
     hud.log(i18n.t('log.levelUp', { level }));
     for (const id of unlocked) hud.log(i18n.t('log.skillUnlocked', { skill: i18n.t(SKILL_NAME[id]) }));
@@ -63,28 +71,67 @@ const scene = new DungeonScene(world, {
       hud.log(i18n.t('log.coins', { count }));
       return;
     }
-    const item = i18n.t(ITEM_NAME[itemId]);
+    const item = itemName(i18n, itemId);
     hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
   },
   onInventoryFull: () => hud.log(i18n.t('log.full'), true),
   onToggleInventory: () => inventory.toggle(),
+  onToggleShop: () => {
+    // Away from the merchant the key explains where to find him instead of doing nothing.
+    if (shop.isOpen || isNearMerchant(world)) shop.toggle();
+    else hud.log(i18n.t('log.far'), true);
+  },
+  onNotice: showNotice,
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
 });
 
+/** Turns a rule event into a line of text for the player. */
+function showNotice(event: GameEvent): void {
+  switch (event.type) {
+    case 'bought':
+      if (event.itemId !== 'coins') hud.log(i18n.t('log.bought', { item: itemName(i18n, event.itemId), count: event.count, cost: event.cost }));
+      return;
+    case 'sold':
+      if (event.itemId !== 'coins') hud.log(i18n.t('log.sold', { item: itemName(i18n, event.itemId), count: event.count, gain: event.gain }));
+      return;
+    case 'chargesEmpty':
+      hud.log(i18n.t('log.noCharges'), true);
+      return;
+    case 'tradeDenied':
+      if (event.reason === 'far') hud.log(i18n.t('log.far'), true);
+      else if (event.reason === 'coins') hud.log(i18n.t('log.noCoins'), true);
+      else if (event.reason === 'full') hud.log(i18n.t('log.noRoom'), true);
+      else hud.log(i18n.t('log.worthless'), true);
+      return;
+    case 'useDenied':
+      if (event.reason === 'cooldown') hud.log(i18n.t('log.potionCooling'), true);
+      else if (event.reason === 'notNeeded') hud.log(event.itemId === 'healthPotion' ? i18n.t('log.healthFull') : i18n.t('log.manaFull'), true);
+      else if (event.itemId !== 'coins') hud.log(i18n.t('log.noneLeft', { item: itemName(i18n, event.itemId) }), true);
+      return;
+    default:
+      return;
+  }
+}
+
 const skillBar = new SkillBar(i18n, (id) => scene.useSkill(id, false));
+const quickBar = new QuickBar(i18n, (command) => scene.send(command));
+const shop = new ShopPanel(i18n, (command) => scene.send(command));
 const inventory = new InventoryPanel(i18n, (command) => scene.send(command));
 
 const hud = new Hud({
   i18n,
   canSave: storage !== null,
+  showControls: loaded.status !== 'ok',
   onLanguageToggle: () => {
     const next = selectable[(selectable.indexOf(i18n.locale) + 1) % selectable.length] as string;
     i18n.setLocale(next);
     saveLocale(storage, next);
     hud.render();
     inventory.render(true);
+    shop.render(true);
     skillBar.update();
+    quickBar.update();
   },
   onNewDungeon: () => {
     // The hero keeps their belongings; only the dungeon is replaced.
