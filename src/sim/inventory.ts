@@ -11,18 +11,21 @@ export interface ItemStack {
 
 /** Everything the hero keeps when moving on to another dungeon. */
 export interface Character {
+  level: number;
+  /** Experience gained towards the next level. */
+  xp: number;
   coins: number;
   inventory: ItemStack[];
   equipment: Record<EquipSlot, ItemId | null>;
 }
 
 export function newCharacter(startingWeapon: ItemId): Character {
-  return { coins: 0, inventory: [], equipment: { weapon: startingWeapon, helmet: null, armor: null, boots: null } };
+  return { level: 1, xp: 0, coins: 0, inventory: [], equipment: { weapon: startingWeapon, helmet: null, armor: null, boots: null } };
 }
 
 export function characterOf(world: World): Character {
-  const { coins, inventory, equipment } = world.player;
-  return { coins, inventory: inventory.map((stack) => ({ ...stack })), equipment: { ...equipment } };
+  const { level, xp, coins, inventory, equipment } = world.player;
+  return { level, xp, coins, inventory: inventory.map((stack) => ({ ...stack })), equipment: { ...equipment } };
 }
 
 export function playerDamage(player: Player): readonly [number, number] {

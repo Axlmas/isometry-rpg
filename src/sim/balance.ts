@@ -15,7 +15,23 @@ export const PILLAR_CHANCE = 0.1;
 export const PLAYER_SPEED = 4.5;
 /** Collision radius. Must stay below 0.5. */
 export const PLAYER_RADIUS = 0.3;
+/** Health and mana at level 1; each further level adds the per-level amount. */
 export const PLAYER_MAX_HP = 100;
+export const PLAYER_HP_PER_LEVEL = 15;
+export const PLAYER_MAX_MP = 40;
+export const PLAYER_MP_PER_LEVEL = 6;
+/** One point of mana comes back every this many ticks. */
+export const PLAYER_MP_REGEN_INTERVAL = ticks(0.5);
+/** Each level above the first adds this share to weapon damage. */
+export const PLAYER_DAMAGE_PER_LEVEL = 0.06;
+
+// Levels
+export const MAX_LEVEL = 20;
+/** Experience to the next level = XP_CURVE_BASE * level ^ XP_CURVE_POWER. */
+export const XP_CURVE_BASE = 50;
+export const XP_CURVE_POWER = 1.5;
+/** Dying costs this share of the experience needed for the current level. */
+export const DEATH_XP_LOSS = 0.05;
 /** Damage without a weapon. Weapon damage is in items.ts. */
 export const UNARMED_DAMAGE: readonly [number, number] = [3, 5];
 /** How many different stacks the hero can carry. */
@@ -42,7 +58,13 @@ export const MONSTER_COUNT = 9;
 /** Monsters are never placed closer than this to the hero's starting point. */
 export const MONSTER_MIN_SPAWN_DISTANCE = 6;
 export const MONSTER_RADIUS = 0.3;
+/** Health, damage and experience of a monster in a level 1 dungeon... */
 export const MONSTER_MAX_HP = 30;
+export const MONSTER_XP = 12;
+/** ...and the share added by each further dungeon level. */
+export const MONSTER_HP_PER_LEVEL = 0.3;
+export const MONSTER_DAMAGE_PER_LEVEL = 0.22;
+export const MONSTER_XP_PER_LEVEL = 0.3;
 export const MONSTER_SPEED = 2.6;
 export const MONSTER_DAMAGE: readonly [number, number] = [5, 9];
 /** A monster notices the hero within this distance. */

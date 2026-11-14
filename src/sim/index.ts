@@ -4,6 +4,8 @@ export * from './grid';
 export * from './inventory';
 export * from './items';
 export * from './pathfinding';
+export * from './progression';
 export * from './rng';
+export * from './skills';
 export * from './step';
 export * from './world';

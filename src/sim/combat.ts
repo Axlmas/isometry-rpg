@@ -1,7 +1,7 @@
 import {
   MONSTER_AGGRO_RANGE, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
-  MONSTER_SPEED, MIN_DAMAGE_TAKEN, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_RADIUS, TICK_MS,
+  MONSTER_SPEED, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
@@ -11,8 +11,9 @@ import {
   MATERIAL_IDS, droppableEquipment,
 } from './items';
 import { findPath } from './pathfinding';
+import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterXp } from './progression';
 import { createRng } from './rng';
-import type { Monster, World } from './world';
+import type { Monster, PendingAttack, World } from './world';
 
 /** Rolls an integer in [min, max] from the world's own random sequence. */
 function roll(world: World, [min, max]: readonly [number, number]): number {
@@ -42,23 +43,25 @@ function dropMonsterLoot(world: World, at: Point): void {
 }
 
 /** Lands the hero's blow: damages every monster inside the swing. */
-export function resolvePlayerAttack(world: World, dir: Point): void {
+export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
   const { player, map } = world;
-  const halfArc = PLAYER_ATTACK_ARC / 2;
+  const { dir } = attack;
+  const halfArc = attack.arc / 2;
+  let xp = 0;
   for (const monster of world.monsters) {
     const dx = monster.pos.x - player.pos.x;
     const dy = monster.pos.y - player.pos.y;
     const distance = Math.hypot(dx, dy);
-    if (distance > PLAYER_ATTACK_RANGE + MONSTER_RADIUS) continue;
+    if (distance > attack.range + MONSTER_RADIUS) continue;
     // A monster standing on top of the hero is hit whatever the direction.
-    if (distance > PLAYER_RADIUS) {
+    if (distance > PLAYER_RADIUS && halfArc < Math.PI) {
       const cos = (dx * dir.x + dy * dir.y) / distance;
       if (Math.acos(Math.min(1, Math.max(-1, cos))) > halfArc) continue;
     }
     // No hitting through walls.
     if (!clearLine(map, player.pos, monster.pos, 0.05)) continue;
 
-    const damage = roll(world, playerDamage(player));
+    const damage = Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * attack.multiplier);
     monster.hp = Math.max(0, monster.hp - damage);
     monster.aggro = true;
     monster.windup = 0; // A hit interrupts the monster's own attack.
@@ -70,9 +73,13 @@ export function resolvePlayerAttack(world: World, dir: Point): void {
       );
     }
     world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
-    if (monster.hp === 0) dropMonsterLoot(world, monster.pos);
+    if (monster.hp === 0) {
+      dropMonsterLoot(world, monster.pos);
+      xp += monsterXp(world.dungeonLevel);
+    }
   }
   world.monsters = world.monsters.filter((monster) => monster.hp > 0);
+  grantXp(world, xp);
 }
 
 /** Applies a monster's blow to the hero; armour absorbs part of it. */
@@ -87,7 +94,7 @@ function hurtPlayer(world: World, rawDamage: number): void {
     player.moveDir = { x: 0, y: 0 };
     player.path = [];
     player.pendingAttack = null;
-    world.events.push({ type: 'playerDied' });
+    world.events.push({ type: 'playerDied', xpLost: applyDeathPenalty(world) });
   }
 }
 
@@ -175,7 +182,7 @@ export function updateMonsters(world: World): void {
       monster.windup -= 1;
       if (monster.windup === 0) {
         monster.cooldown = MONSTER_ATTACK_COOLDOWN;
-        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, roll(world, MONSTER_DAMAGE));
+        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(world.dungeonLevel)));
       }
     } else if (distance <= MONSTER_ATTACK_START && monster.cooldown === 0) {
       monster.windup = MONSTER_ATTACK_WINDUP;

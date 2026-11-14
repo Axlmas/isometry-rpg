@@ -1,10 +1,24 @@
 import {
-  MONSTER_COUNT, MONSTER_MAX_HP, MONSTER_MIN_SPAWN_DISTANCE, PILLAR_CHANCE, PLAYER_MAX_HP, ROOM_SIZE,
+  MAX_LEVEL, MONSTER_COUNT, MONSTER_MIN_SPAWN_DISTANCE, PILLAR_CHANCE, ROOM_SIZE,
 } from './balance';
 import { type GridMap, type Point, type Tile, TILE_FLOOR, TILE_WALL, isWalkable } from './grid';
 import { type Character, type ItemStack, newCharacter } from './inventory';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
+import { maxHpAtLevel, maxMpAtLevel, monsterMaxHp } from './progression';
 import { createRng } from './rng';
+import type { SkillId } from './skills';
+
+/** A blow on its way: its direction, shape and strength. */
+export interface PendingAttack {
+  dir: Point;
+  /** Ticks until it lands. */
+  ticks: number;
+  /** Full width of the swing in radians; 2π hits all around. */
+  arc: number;
+  range: number;
+  /** Applied to weapon damage. */
+  multiplier: number;
+}
 
 export interface Player {
   /** Position in tile units; whole numbers are tile centres. Not bound to the grid. */
@@ -23,9 +37,16 @@ export interface Player {
   /** Ticks until the next attack is allowed. */
   attackCooldown: number;
   /** A blow that has been started but has not landed yet. */
-  pendingAttack: { dir: Point; ticks: number } | null;
+  pendingAttack: PendingAttack | null;
   /** Ticks since the hero last took damage; drives health regeneration. */
   ticksSinceHurt: number;
+  level: number;
+  /** Experience gained towards the next level. */
+  xp: number;
+  mp: number;
+  maxMp: number;
+  /** Ticks until each skill can be used again. */
+  skillCooldowns: Record<SkillId, number>;
   coins: number;
   /** At most INVENTORY_SLOTS stacks. */
   inventory: ItemStack[];
@@ -74,7 +95,12 @@ export type GameEvent =
   | { type: 'monsterHit'; id: number; damage: number; pos: Point; died: boolean }
   | { type: 'monsterWindup'; id: number }
   | { type: 'playerHit'; damage: number }
-  | { type: 'playerDied' }
+  | { type: 'playerDied'; xpLost: number }
+  | { type: 'playerHealed'; amount: number }
+  | { type: 'xpGained'; amount: number }
+  | { type: 'levelUp'; level: number; unlocked: SkillId[] }
+  | { type: 'skillUsed'; id: SkillId; dir: Point }
+  | { type: 'skillDenied'; id: SkillId; reason: 'locked' | 'cooldown' | 'mana' }
   | { type: 'playerRespawned' }
   | { type: 'lootDropped'; id: number }
   | { type: 'itemPicked'; itemId: ItemId; count: number }
@@ -92,6 +118,8 @@ export interface World {
   monsters: Monster[];
   /** How many monsters this dungeon started with. */
   monsterTotal: number;
+  /** Sets how strong this dungeon's monsters are and how much experience they give. */
+  dungeonLevel: number;
   /** Items on the floor, ordered by id. */
   loot: GroundLoot[];
   nextLootId: number;
@@ -107,6 +135,8 @@ export type Command =
   /** Strike in a direction. Ignored while the previous attack is cooling down. */
   | { type: 'attack'; dx: number; dy: number }
   /** Return to the entrance with full health. Only works when the hero is dead. */
+  /** Use a skill. A zero direction means "where the hero is facing". */
+  | { type: 'skill'; id: SkillId; dx: number; dy: number }
   | { type: 'respawn' }
   /** Wear the item in an inventory slot. */
   | { type: 'equip'; index: number }
@@ -117,9 +147,16 @@ export type Command =
 
 /**
  * Builds a dungeon from a seed. Pass the hero's belongings to carry them over
- * from the previous dungeon; without them a new hero is created.
+ * from the previous dungeon; without them a new hero is created. The dungeon
+ * is as strong as the hero entering it unless a level is given.
  */
-export function createWorld(seed: number, character: Character = newCharacter(STARTING_WEAPON)): World {
+export function createWorld(
+  seed: number,
+  character: Character = newCharacter(STARTING_WEAPON),
+  dungeonLevel: number = character.level,
+): World {
+  const level = Math.min(MAX_LEVEL, Math.max(1, Math.floor(character.level)));
+  const monsterHp = monsterMaxHp(dungeonLevel);
   const rng = createRng(seed >>> 0);
   const width = ROOM_SIZE;
   const height = ROOM_SIZE;
@@ -174,8 +211,8 @@ export function createWorld(seed: number, character: Character = newCharacter(ST
       kind: 'grunt',
       home,
       pos: { ...home },
-      hp: MONSTER_MAX_HP,
-      maxHp: MONSTER_MAX_HP,
+      hp: monsterHp,
+      maxHp: monsterHp,
       aggro: false,
       windup: 0,
       cooldown: 0,
@@ -194,8 +231,13 @@ export function createWorld(seed: number, character: Character = newCharacter(ST
       moveDir: { x: 0, y: 0 },
       path: [],
       distance: 0,
-      hp: PLAYER_MAX_HP,
-      maxHp: PLAYER_MAX_HP,
+      hp: maxHpAtLevel(level),
+      maxHp: maxHpAtLevel(level),
+      level,
+      xp: character.xp,
+      mp: maxMpAtLevel(level),
+      maxMp: maxMpAtLevel(level),
+      skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0 },
       facing: { x: 1, y: 1 },
       attackCooldown: 0,
       pendingAttack: null,
@@ -207,6 +249,7 @@ export function createWorld(seed: number, character: Character = newCharacter(ST
     },
     monsters,
     monsterTotal: monsters.length,
+    dungeonLevel,
     loot: [],
     nextLootId: 0,
     events: [],
