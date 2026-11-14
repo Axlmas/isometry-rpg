@@ -28,5 +28,8 @@
   "prompt.trade": "Appears when the hero stands next to the merchant. T is a physical key.",
   "hud.zone": "{zone} is a region name and {danger} one of the zone.safe / zone.level / zone.levels phrases. Only the separator may change.",
   "zone.safe": "Follows a region name after a dot ('Stillford · a safe place') and stands alone under it on the big banner, so it starts lower-case.",
-  "zone.levels": "Same position as zone.safe. {min} and {max} are the levels of the monsters that live in the region."
+  "zone.levels": "Same position as zone.safe. {min} and {max} are the levels of the monsters that live in the region.",
+  "tooltip.equip": "Last line of the hint that appears when the cursor is over an item in the bag.",
+  "inventory.pick": "Shown under the bag grid while no item is picked.",
+  "inventory.emptyCell": "Read by screen readers for a bag cell with nothing in it."
 }

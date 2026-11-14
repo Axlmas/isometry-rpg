@@ -1,5 +1,6 @@
 import type { I18n } from '../i18n';
 import { type ItemId, ITEMS } from '../sim';
+import { itemIcon } from './itemIcon';
 import { GRADE_COLOR, GRADE_NAME, ITEM_NAME } from './itemText';
 
 export function element<T extends HTMLElement>(id: string): T {
@@ -19,7 +20,7 @@ export function itemName(i18n: I18n, itemId: Exclude<ItemId, 'coins'>): string {
   return i18n.t(ITEM_NAME[itemId]);
 }
 
-/** Name, kind and numbers of an item as one block, shared by the bag and the shop. */
+/** Icon, name, kind and numbers of an item as one block: a row in the merchant's window. */
 export function describeItem(i18n: I18n, itemId: ItemId, count: number): HTMLElement {
   const def = ITEMS[itemId];
   const block = make('span', 'item-info');
@@ -45,5 +46,7 @@ export function describeItem(i18n: I18n, itemId: ItemId, count: number): HTMLEle
     detail = i18n.t('inventory.charge');
   }
   block.append(make('span', 'item-detail', detail));
-  return block;
+  const row = make('span', 'item-with-icon');
+  row.append(itemIcon(itemId), block);
+  return row;
 }

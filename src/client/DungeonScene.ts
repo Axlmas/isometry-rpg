@@ -89,6 +89,7 @@ export class DungeonScene extends Phaser.Scene {
   private readonly heldKeys = new Set<string>();
   private holdTimer = 0;
   private peaceful = false;
+  private savedRevision = 0;
   private mapObjects: Phaser.GameObjects.GameObject[] = [];
   private floorTextures: string[] = [];
   /** For each obstacle picture: where the tile centre sits, as a share of the picture's height. */
@@ -181,6 +182,7 @@ export class DungeonScene extends Phaser.Scene {
     this.lastFrameAt = performance.now();
     this.previous = { ...world.player.pos };
     this.wasMoving = false;
+    this.savedRevision = world.player.revision;
     this.lastStats = '';
     this.heldKeys.clear();
     this.marker.setVisible(false);
@@ -371,6 +373,11 @@ export class DungeonScene extends Phaser.Scene {
     }
     this.wasMoving = moving;
 
+    // Coins, the bag or the equipment changed: worth saving at once.
+    if (this.world.player.revision !== this.savedRevision) {
+      this.savedRevision = this.world.player.revision;
+      checkpoint = true;
+    }
     this.reportStats();
     this.events_.onTick(this.world);
     if (checkpoint) this.events_.onCheckpoint(this.world);

@@ -1,0 +1,81 @@
+import { type ItemId, ITEMS } from '../sim';
+
+// Item icons are drawn here as small vector pictures, so the game ships no
+// image files. Every icon fits a 32x32 box. All the markup below is fixed
+// text from this file, never player input.
+
+const OUTLINE = 'stroke="#12141a" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
+
+const sword = (blade: string, guard: string, wide = false): string => `
+  <path d="M${wide ? 23 : 24} 4 L28 ${wide ? 9 : 8} L13 ${wide ? 24 : 23} L${wide ? 8 : 9} 19 Z" fill="${blade}" ${OUTLINE}/>
+  <path d="M7 17 L15 25" stroke="${guard}" stroke-width="4" stroke-linecap="round"/>
+  <path d="M9 23 L5 27" stroke="#5a3f26" stroke-width="4" stroke-linecap="round"/>`;
+
+const helmet = (color: string, shade: string, guard: boolean): string => `
+  <path d="M6 22 Q6 7 16 7 Q26 7 26 22 Z" fill="${color}" ${OUTLINE}/>
+  <path d="M5 22 H27 V25 H5 Z" fill="${shade}" ${OUTLINE}/>
+  ${guard ? `<path d="M15 14 H17 V27 H15 Z" fill="${shade}" ${OUTLINE}/>` : ''}`;
+
+const vest = (color: string, shade: string, rings: boolean): string => `
+  <path d="M9 6 L13 6 Q16 10 19 6 L23 6 L28 11 L24 15 L24 27 L8 27 L8 15 L4 11 Z" fill="${color}" ${OUTLINE}/>
+  <path d="M8 21 H24" stroke="${shade}" stroke-width="2"/>
+  ${rings ? `<g fill="${shade}"><circle cx="12" cy="13" r="1.2"/><circle cx="16" cy="15" r="1.2"/><circle cx="20" cy="13" r="1.2"/><circle cx="12" cy="18" r="1.2"/><circle cx="20" cy="18" r="1.2"/><circle cx="16" cy="24" r="1.2"/></g>` : ''}`;
+
+const boot = (color: string, shade: string): string => `
+  <path d="M11 5 H19 V18 Q27 19 27 24 V27 H8 V18 Z" fill="${color}" ${OUTLINE}/>
+  <path d="M8 24 H27" stroke="${shade}" stroke-width="2"/>`;
+
+const flask = (liquid: string): string => `
+  <path d="M13 5 H19 V11 L25 21 Q27 27 21 27 H11 Q5 27 7 21 L13 11 Z" fill="#dfe6ee" fill-opacity="0.35" ${OUTLINE}/>
+  <path d="M10 17 H22 L24.5 21.5 Q26 26 21 26 H11 Q6 26 7.5 21.5 Z" fill="${liquid}"/>
+  <path d="M12 4 H20" stroke="#8a6a45" stroke-width="3" stroke-linecap="round"/>`;
+
+const crystal = (color: string, light: string): string => `
+  <path d="M16 3 L24 12 L18 29 L14 29 L8 12 Z" fill="${color}" ${OUTLINE}/>
+  <path d="M16 3 L16 29 M8 12 L24 12" stroke="${light}" stroke-width="1" opacity="0.8"/>`;
+
+const IRON = '#b8bcc6';
+const IRON_DARK = '#7f8591';
+const LEATHER = '#a8743e';
+const LEATHER_DARK = '#6e4a24';
+const D_STEEL = '#8fbaf2';
+const D_STEEL_DARK = '#4f7fbf';
+
+const ICONS: Record<ItemId, string> = {
+  coins: '<ellipse cx="13" cy="20" rx="9" ry="5" fill="#b8862b" stroke="#12141a" stroke-width="1.5"/><ellipse cx="13" cy="17" rx="9" ry="5" fill="#f2c94c" stroke="#12141a" stroke-width="1.5"/><ellipse cx="20" cy="13" rx="8" ry="4.5" fill="#f2c94c" stroke="#12141a" stroke-width="1.5"/>',
+
+  leather: `<path d="M8 6 Q16 9 24 6 L27 12 Q24 16 27 21 L23 27 Q16 24 9 27 L5 21 Q8 16 5 12 Z" fill="#c89a62" ${OUTLINE}/>`,
+  ironOre: `<path d="M6 22 L10 10 L19 6 L27 14 L24 26 L11 27 Z" fill="#7c8088" ${OUTLINE}/><circle cx="13" cy="15" r="2.2" fill="#d98a4a"/><circle cx="20" cy="19" r="2.6" fill="#d98a4a"/><circle cx="18" cy="11" r="1.5" fill="#d98a4a"/>`,
+  coal: `<path d="M5 22 L9 13 L16 11 L20 17 L17 26 L8 27 Z" fill="#2b2d33" ${OUTLINE}/><path d="M15 16 L20 8 L27 11 L28 21 L21 25 Z" fill="#3a3d45" ${OUTLINE}/><path d="M9 16 L13 14 M21 13 L24 13" stroke="#6b7080" stroke-width="1.5"/>`,
+  bone: `<path d="M9 23 L23 9" stroke="#ece6d6" stroke-width="5" stroke-linecap="round"/><g fill="#ece6d6" stroke="#12141a" stroke-width="1.2"><circle cx="7" cy="22" r="3.2"/><circle cx="10" cy="25" r="3.2"/><circle cx="22" cy="7" r="3.2"/><circle cx="25" cy="10" r="3.2"/></g>`,
+  thread: `<path d="M9 8 H23 V24 H9 Z" fill="#d8cfc0" ${OUTLINE}/><path d="M9 11 H23 M9 14 H23 M9 17 H23 M9 20 H23" stroke="#a89c86" stroke-width="1.2"/><path d="M7 5 H25 V8 H7 Z M7 24 H25 V27 H7 Z" fill="#8a6a45" ${OUTLINE}/>`,
+
+  trainingSword: sword('#b98d57', '#7a5a33'),
+  ironSword: sword(IRON, IRON_DARK),
+  soldierBlade: sword(D_STEEL, '#d9b24a', true),
+
+  leatherCap: helmet(LEATHER, LEATHER_DARK, false),
+  ironHelm: helmet(D_STEEL, D_STEEL_DARK, true),
+
+  leatherJerkin: vest(LEATHER, LEATHER_DARK, false),
+  chainShirt: vest(D_STEEL, D_STEEL_DARK, true),
+
+  leatherBoots: boot(LEATHER, LEATHER_DARK),
+  ironGreaves: boot(D_STEEL, D_STEEL_DARK),
+
+  healthPotion: flask('#d9534f'),
+  manaPotion: flask('#4f8fe0'),
+  chargePlain: crystal('#cfd3dc', '#ffffff'),
+  chargeD: crystal('#5fa8ff', '#d6eaff'),
+};
+
+/** An element showing the item's picture. Purely decorative: the name is given in text elsewhere. */
+export function itemIcon(itemId: ItemId): HTMLElement {
+  const holder = document.createElement('span');
+  holder.className = 'icon';
+  holder.setAttribute('aria-hidden', 'true');
+  holder.innerHTML = `<svg viewBox="0 0 32 32" width="100%" height="100%">${ICONS[itemId]}</svg>`;
+  const def = ITEMS[itemId];
+  if (def.kind === 'equipment') holder.dataset.grade = def.grade;
+  return holder;
+}

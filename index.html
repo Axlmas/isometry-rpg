@@ -40,10 +40,10 @@
       <button id="inventory-close" type="button" class="small" data-i18n="inventory.close"></button>
     </div>
     <h3 data-i18n="inventory.equipped"></h3>
-    <ul id="equipment-list" class="item-list"></ul>
+    <div id="equipment-grid" class="cells"></div>
     <h3 id="inventory-count"></h3>
-    <p id="inventory-empty" class="item-empty" data-i18n="inventory.empty"></p>
-    <ul id="inventory-list" class="item-list"></ul>
+    <div id="bag-grid" class="cells"></div>
+    <div id="item-detail"></div>
   </aside>
 
   <aside id="shop" class="panel" aria-labelledby="shop-title" hidden>
@@ -75,6 +75,8 @@
       <button id="death-respawn" type="button" class="primary" data-i18n="death.respawn"></button>
     </div>
   </div>
+
+  <div id="tooltip" role="tooltip" hidden></div>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
 
