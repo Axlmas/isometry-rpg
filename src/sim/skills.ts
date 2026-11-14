@@ -1,4 +1,5 @@
-import { PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, TICK_MS } from './balance';
+import { CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, TICK_MS } from './balance';
+import { spendCharge } from './inventory';
 import type { Point } from './grid';
 import type { World } from './world';
 
@@ -74,13 +75,22 @@ export function useSkill(world: World, id: SkillId, dir: Point | null): void {
   }
 
   const { effect } = def;
+  let charged = false;
   if (effect.kind === 'strike') {
     // A blow already in the air has to land first; the key press is simply ignored.
     if (player.pendingAttack !== null) return;
     const aim = dir ?? player.facing;
     player.facing = aim;
     player.attackCooldown = PLAYER_ATTACK_COOLDOWN;
-    player.pendingAttack = { dir: aim, ticks: PLAYER_ATTACK_WINDUP, arc: effect.arc, range: effect.range, multiplier: effect.multiplier };
+    charged = spendCharge(world);
+    player.pendingAttack = {
+      dir: aim,
+      ticks: PLAYER_ATTACK_WINDUP,
+      arc: effect.arc,
+      range: effect.range,
+      multiplier: effect.multiplier * (charged ? CHARGE_DAMAGE_MULTIPLIER : 1),
+      charged,
+    };
   } else {
     const healed = Math.min(player.maxHp - player.hp, Math.round(player.maxHp * effect.fraction));
     player.hp += healed;
@@ -88,5 +98,5 @@ export function useSkill(world: World, id: SkillId, dir: Point | null): void {
   }
   player.mp -= def.manaCost;
   player.skillCooldowns[id] = def.cooldown;
-  world.events.push({ type: 'skillUsed', id, dir: { ...player.facing } });
+  world.events.push({ type: 'skillUsed', id, dir: { ...player.facing }, charged });
 }

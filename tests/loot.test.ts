@@ -61,6 +61,7 @@ describe('monster drops', () => {
   it('always include coins within the stated range and sometimes an item', () => {
     let materials = 0;
     let equipment = 0;
+    let consumables = 0;
     const kills = 300;
     for (let seed = 0; seed < kills; seed++) {
       const world = openWorld(seed);
@@ -76,16 +77,20 @@ describe('monster drops', () => {
       const others = world.loot.filter((l) => l.itemId !== 'coins');
       expect(others.length).toBeLessThanOrEqual(1);
       for (const loot of others) {
-        if (ITEMS[loot.itemId].kind === 'material') materials += 1;
-        else equipment += 1;
+        const { kind } = ITEMS[loot.itemId];
+        if (kind === 'material') materials += 1;
+        else if (kind === 'equipment') equipment += 1;
+        else consumables += 1;
         expect(loot.itemId).not.toBe(STARTING_WEAPON);
       }
     }
-    // Loose bounds around the configured 40% and 24%: this guards against a broken table, not the exact odds.
-    expect(materials / kills).toBeGreaterThan(0.25);
-    expect(materials / kills).toBeLessThan(0.55);
-    expect(equipment / kills).toBeGreaterThan(0.12);
-    expect(equipment / kills).toBeLessThan(0.38);
+    // Loose bounds around the configured 34%, 20% and 18%: this guards against a broken table, not the exact odds.
+    expect(materials / kills).toBeGreaterThan(0.22);
+    expect(materials / kills).toBeLessThan(0.46);
+    expect(equipment / kills).toBeGreaterThan(0.1);
+    expect(equipment / kills).toBeLessThan(0.32);
+    expect(consumables / kills).toBeGreaterThan(0.09);
+    expect(consumables / kills).toBeLessThan(0.29);
   });
 });
 

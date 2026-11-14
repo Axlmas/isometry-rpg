@@ -201,7 +201,7 @@ describe('skills', () => {
   it('cost mana, start a cooldown and become usable again after it', () => {
     const world = arena([], 10);
     step(world, [{ type: 'skill', id: 'heavyBlow', dx: 1, dy: 0 }]);
-    expect(world.events).toContainEqual({ type: 'skillUsed', id: 'heavyBlow', dir: { x: 1, y: 0 } });
+    expect(world.events).toContainEqual({ type: 'skillUsed', id: 'heavyBlow', dir: { x: 1, y: 0 }, charged: false });
     // Mana may tick back by one point in the same tick.
     expect(world.player.maxMp - world.player.mp).toBeGreaterThanOrEqual(SKILLS.heavyBlow.manaCost - 1);
     expect(world.player.maxMp - world.player.mp).toBeLessThanOrEqual(SKILLS.heavyBlow.manaCost);

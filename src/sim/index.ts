@@ -6,6 +6,7 @@ export * from './items';
 export * from './pathfinding';
 export * from './progression';
 export * from './rng';
+export * from './shop';
 export * from './skills';
 export * from './step';
 export * from './world';

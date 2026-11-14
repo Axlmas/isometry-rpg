@@ -80,3 +80,13 @@ export const MONSTER_ATTACK_COOLDOWN = ticks(0.9);
 export const MONSTER_KNOCKBACK = 0.25;
 /** How often a monster re-plans its way around walls. */
 export const MONSTER_REPATH_INTERVAL = ticks(0.4);
+
+// Consumables and trade
+/** A charged blow deals this many times the normal damage. */
+export const CHARGE_DAMAGE_MULTIPLIER = 1.5;
+/** After drinking a potion, the next one has to wait this long. */
+export const POTION_COOLDOWN = ticks(6);
+/** The hero can trade while standing this close to the merchant. */
+export const MERCHANT_RANGE = 2.2;
+/** The most the hero can buy or sell in one order. */
+export const MAX_TRADE_COUNT = 1000;

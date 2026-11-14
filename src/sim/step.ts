@@ -1,11 +1,12 @@
 import {
-  PLAYER_ATTACK_ARC, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
+  CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
   PLAYER_RADIUS, PLAYER_REGEN_DELAY, PLAYER_REGEN_INTERVAL, PLAYER_SPEED, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
-import { dropFromInventory, equipFromInventory, pickUpLoot, unequip } from './inventory';
+import { dropFromInventory, equipFromInventory, pickUpLoot, spendCharge, toggleCharges, unequip, useItem } from './inventory';
+import { buy, sell } from './shop';
 import { findPath } from './pathfinding';
 import { SKILL_IDS, useSkill } from './skills';
 import type { Command, World } from './world';
@@ -85,8 +86,16 @@ function applyCommand(world: World, command: Command): void {
       if (dir === null || player.attackCooldown > 0) return;
       player.facing = dir;
       player.attackCooldown = PLAYER_ATTACK_COOLDOWN;
-      player.pendingAttack = { dir, ticks: PLAYER_ATTACK_WINDUP, arc: PLAYER_ATTACK_ARC, range: PLAYER_ATTACK_RANGE, multiplier: 1 };
-      world.events.push({ type: 'playerSwing', dir });
+      const charged = spendCharge(world);
+      player.pendingAttack = {
+        dir,
+        ticks: PLAYER_ATTACK_WINDUP,
+        arc: PLAYER_ATTACK_ARC,
+        range: PLAYER_ATTACK_RANGE,
+        multiplier: charged ? CHARGE_DAMAGE_MULTIPLIER : 1,
+        charged,
+      };
+      world.events.push({ type: 'playerSwing', dir, charged });
       return;
     }
     case 'skill':
@@ -100,6 +109,18 @@ function applyCommand(world: World, command: Command): void {
       return;
     case 'drop':
       dropFromInventory(world, command.index);
+      return;
+    case 'use':
+      useItem(world, command.itemId);
+      return;
+    case 'toggleCharges':
+      toggleCharges(world);
+      return;
+    case 'buy':
+      buy(world, command.itemId, command.count);
+      return;
+    case 'sell':
+      sell(world, command.index, command.count);
       return;
   }
 }
@@ -155,6 +176,7 @@ export function step(world: World, commands: readonly Command[] = []): void {
     movePlayer(world);
 
     if (player.attackCooldown > 0) player.attackCooldown -= 1;
+    if (player.potionCooldown > 0) player.potionCooldown -= 1;
     for (const id of SKILL_IDS) {
       if (player.skillCooldowns[id] > 0) player.skillCooldowns[id] -= 1;
     }

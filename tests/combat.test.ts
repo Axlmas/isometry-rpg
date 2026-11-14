@@ -51,7 +51,7 @@ describe('hero attack', () => {
   it('damages a monster in front, within the damage range, after the wind-up', () => {
     const world = arena([[1, 0]]);
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-    expect(world.events).toContainEqual({ type: 'playerSwing', dir: { x: 1, y: 0 } });
+    expect(world.events).toContainEqual({ type: 'playerSwing', dir: { x: 1, y: 0 }, charged: false });
     if (PLAYER_ATTACK_WINDUP > 1) expect(world.monsters[0]?.hp).toBe(MONSTER_MAX_HP);
     land(world);
     const dealt = MONSTER_MAX_HP - (world.monsters[0] as Monster).hp;

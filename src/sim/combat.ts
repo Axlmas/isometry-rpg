@@ -7,8 +7,8 @@ import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { dropLoot, playerDamage, playerDefense } from './inventory';
 import {
-  DROP_COINS, DROP_D_EQUIPMENT_CHANCE, DROP_MATERIAL_CHANCE, DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE,
-  MATERIAL_IDS, droppableEquipment,
+  DROP_CHARGES_CHANCE, DROP_CHARGES_COUNT, DROP_COINS, DROP_D_EQUIPMENT_CHANCE, DROP_MATERIAL_CHANCE,
+  DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE, DROP_POTIONS, DROP_POTION_CHANCE, MATERIAL_IDS, droppableEquipment,
 } from './items';
 import { findPath } from './pathfinding';
 import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterXp } from './progression';
@@ -33,13 +33,17 @@ function dropMonsterLoot(world: World, at: Point): void {
   // Placed slightly apart so both drops are visible.
   const beside = { x: at.x + 0.35, y: at.y + 0.1 };
   const chance = roll(world, [1, 100]);
-  if (chance <= DROP_MATERIAL_CHANCE) {
-    dropLoot(world, pick(world, MATERIAL_IDS), roll(world, DROP_MATERIAL_COUNT), beside);
-  } else if (chance <= DROP_MATERIAL_CHANCE + DROP_PLAIN_EQUIPMENT_CHANCE) {
-    dropLoot(world, pick(world, droppableEquipment('none')), 1, beside);
-  } else if (chance <= DROP_MATERIAL_CHANCE + DROP_PLAIN_EQUIPMENT_CHANCE + DROP_D_EQUIPMENT_CHANCE) {
-    dropLoot(world, pick(world, droppableEquipment('d')), 1, beside);
-  }
+  // Each threshold is the upper end of one outcome's share of the roll.
+  const material = DROP_MATERIAL_CHANCE;
+  const plain = material + DROP_PLAIN_EQUIPMENT_CHANCE;
+  const dGrade = plain + DROP_D_EQUIPMENT_CHANCE;
+  const potion = dGrade + DROP_POTION_CHANCE;
+  const charges = potion + DROP_CHARGES_CHANCE;
+  if (chance <= material) dropLoot(world, pick(world, MATERIAL_IDS), roll(world, DROP_MATERIAL_COUNT), beside);
+  else if (chance <= plain) dropLoot(world, pick(world, droppableEquipment('none')), 1, beside);
+  else if (chance <= dGrade) dropLoot(world, pick(world, droppableEquipment('d')), 1, beside);
+  else if (chance <= potion) dropLoot(world, pick(world, DROP_POTIONS), 1, beside);
+  else if (chance <= charges) dropLoot(world, 'chargePlain', roll(world, DROP_CHARGES_COUNT), beside);
 }
 
 /** Lands the hero's blow: damages every monster inside the swing. */

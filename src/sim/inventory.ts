@@ -1,7 +1,7 @@
-import { INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, UNARMED_DAMAGE } from './balance';
+import { INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
 import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
-import { type EquipSlot, type ItemId, EQUIP_SLOTS, ITEMS } from './items';
+import { type EquipSlot, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, maxStackOf } from './items';
 import type { Player, World } from './world';
 
 export interface ItemStack {
@@ -55,7 +55,7 @@ export function addItem(player: Player, itemId: ItemId, count: number): number {
     player.coins += left;
     left = 0;
   } else {
-    const maxStack = def.kind === 'material' ? def.maxStack : 1;
+    const maxStack = maxStackOf(itemId);
     if (maxStack > 1) {
       for (const stack of player.inventory) {
         if (left === 0) break;
@@ -73,6 +73,97 @@ export function addItem(player: Player, itemId: ItemId, count: number): number {
   }
   if (left !== count) player.revision += 1;
   return left;
+}
+
+export function countItem(player: Player, itemId: ItemId): number {
+  let total = 0;
+  for (const stack of player.inventory) if (stack.itemId === itemId) total += stack.count;
+  return total;
+}
+
+/** True when `count` of the item would fit in the bag as it is now. */
+export function canFit(player: Player, itemId: ItemId, count: number): boolean {
+  if (ITEMS[itemId].kind === 'currency') return true;
+  const maxStack = maxStackOf(itemId);
+  let room = (INVENTORY_SLOTS - player.inventory.length) * maxStack;
+  if (maxStack > 1) {
+    for (const stack of player.inventory) if (stack.itemId === itemId) room += maxStack - stack.count;
+  }
+  return room >= count;
+}
+
+/** Takes items out of the bag, emptying later stacks first. Returns false, changing nothing, if there are too few. */
+export function removeItem(player: Player, itemId: ItemId, count: number): boolean {
+  if (count <= 0 || countItem(player, itemId) < count) return false;
+  let left = count;
+  for (let i = player.inventory.length - 1; i >= 0 && left > 0; i--) {
+    const stack = player.inventory[i] as ItemStack;
+    if (stack.itemId !== itemId) continue;
+    const taken = Math.min(left, stack.count);
+    stack.count -= taken;
+    left -= taken;
+    if (stack.count === 0) player.inventory.splice(i, 1);
+  }
+  player.revision += 1;
+  return true;
+}
+
+/** The charge item that fits the weapon in hand, or null when unarmed. */
+export function chargeForWeapon(player: Player): ItemId | null {
+  const weapon = player.equipment.weapon;
+  const def = weapon ? ITEMS[weapon] : null;
+  return def && def.kind === 'equipment' ? CHARGE_FOR_GRADE[def.grade] : null;
+}
+
+/**
+ * Called when a blow starts. If charges are switched on and one fits the
+ * weapon, spends it and returns true. Running out switches charges off.
+ */
+export function spendCharge(world: World): boolean {
+  const { player } = world;
+  if (!player.chargesOn) return false;
+  const itemId = chargeForWeapon(player);
+  if (itemId !== null && removeItem(player, itemId, 1)) return true;
+  player.chargesOn = false;
+  player.revision += 1;
+  world.events.push({ type: 'chargesEmpty' });
+  return false;
+}
+
+export function toggleCharges(world: World): void {
+  const { player } = world;
+  if (!player.chargesOn) {
+    const itemId = chargeForWeapon(player);
+    if (itemId === null || countItem(player, itemId) === 0) {
+      world.events.push({ type: 'chargesEmpty' });
+      return;
+    }
+  }
+  player.chargesOn = !player.chargesOn;
+  player.revision += 1;
+}
+
+/** Drinks a potion from the bag. */
+export function useItem(world: World, itemId: ItemId): void {
+  const { player } = world;
+  const def = Object.prototype.hasOwnProperty.call(ITEMS, itemId) ? ITEMS[itemId] : null;
+  if (!def || def.kind !== 'consumable' || def.effect.kind === 'charge') return;
+  const { effect } = def;
+  const deny = (reason: 'none' | 'cooldown' | 'notNeeded') => world.events.push({ type: 'useDenied', itemId, reason });
+  if (countItem(player, itemId) === 0) return void deny('none');
+  if (player.potionCooldown > 0) return void deny('cooldown');
+  const missing = effect.kind === 'heal' ? player.maxHp - player.hp : player.maxMp - player.mp;
+  if (missing <= 0) return void deny('notNeeded');
+  removeItem(player, itemId, 1);
+  const amount = Math.min(missing, effect.amount);
+  if (effect.kind === 'heal') {
+    player.hp += amount;
+    world.events.push({ type: 'playerHealed', amount });
+  } else {
+    player.mp += amount;
+  }
+  player.potionCooldown = POTION_COOLDOWN;
+  world.events.push({ type: 'itemUsed', itemId });
 }
 
 /** Puts an item on the floor. `ignored` keeps the hero from picking it right back up. */

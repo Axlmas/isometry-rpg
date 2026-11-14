@@ -18,6 +18,8 @@ export interface PendingAttack {
   range: number;
   /** Applied to weapon damage. */
   multiplier: number;
+  /** True when a weapon charge was spent on this blow. */
+  charged: boolean;
 }
 
 export interface Player {
@@ -47,6 +49,10 @@ export interface Player {
   maxMp: number;
   /** Ticks until each skill can be used again. */
   skillCooldowns: Record<SkillId, number>;
+  /** When on, every blow spends a weapon charge and hits harder. */
+  chargesOn: boolean;
+  /** Ticks until the next potion can be drunk. */
+  potionCooldown: number;
   coins: number;
   /** At most INVENTORY_SLOTS stacks. */
   inventory: ItemStack[];
@@ -91,7 +97,7 @@ export interface Monster {
  * animation, sound and text; they never carry player-readable text.
  */
 export type GameEvent =
-  | { type: 'playerSwing'; dir: Point }
+  | { type: 'playerSwing'; dir: Point; charged: boolean }
   | { type: 'monsterHit'; id: number; damage: number; pos: Point; died: boolean }
   | { type: 'monsterWindup'; id: number }
   | { type: 'playerHit'; damage: number }
@@ -99,7 +105,14 @@ export type GameEvent =
   | { type: 'playerHealed'; amount: number }
   | { type: 'xpGained'; amount: number }
   | { type: 'levelUp'; level: number; unlocked: SkillId[] }
-  | { type: 'skillUsed'; id: SkillId; dir: Point }
+  | { type: 'skillUsed'; id: SkillId; dir: Point; charged: boolean }
+  | { type: 'itemUsed'; itemId: ItemId }
+  | { type: 'useDenied'; itemId: ItemId; reason: 'none' | 'cooldown' | 'notNeeded' }
+  /** Charges were asked for but none fit the weapon in hand. */
+  | { type: 'chargesEmpty' }
+  | { type: 'bought'; itemId: ItemId; count: number; cost: number }
+  | { type: 'sold'; itemId: ItemId; count: number; gain: number }
+  | { type: 'tradeDenied'; reason: 'far' | 'coins' | 'full' | 'worthless' }
   | { type: 'skillDenied'; id: SkillId; reason: 'locked' | 'cooldown' | 'mana' }
   | { type: 'playerRespawned' }
   | { type: 'lootDropped'; id: number }
@@ -113,6 +126,8 @@ export interface World {
   rngState: number;
   map: GridMap;
   spawn: Point;
+  /** Where the merchant stands; always next to the entrance. Monsters ignore him. */
+  merchant: Point;
   player: Player;
   /** Living monsters, ordered by id. */
   monsters: Monster[];
@@ -143,7 +158,14 @@ export type Command =
   /** Move a worn item back to the inventory. */
   | { type: 'unequip'; slot: EquipSlot }
   /** Drop an inventory slot on the floor. */
-  | { type: 'drop'; index: number };
+  | { type: 'drop'; index: number }
+  /** Drink a potion from the bag. */
+  | { type: 'use'; itemId: ItemId }
+  /** Switch weapon charges on or off. */
+  | { type: 'toggleCharges' }
+  /** Trade with the merchant; only works next to him. */
+  | { type: 'buy'; itemId: ItemId; count: number }
+  | { type: 'sell'; index: number; count: number };
 
 /**
  * Builds a dungeon from a seed. Pass the hero's belongings to carry them over
@@ -226,6 +248,8 @@ export function createWorld(
     rngState: rng.state,
     map,
     spawn,
+    // The tiles around the entrance are always free, so the merchant never stands in a wall.
+    merchant: { x: spawn.x - 1, y: spawn.y - 1 },
     player: {
       pos: { ...spawn },
       moveDir: { x: 0, y: 0 },
@@ -238,6 +262,8 @@ export function createWorld(
       mp: maxMpAtLevel(level),
       maxMp: maxMpAtLevel(level),
       skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0 },
+      chargesOn: false,
+      potionCooldown: 0,
       facing: { x: 1, y: 1 },
       attackCooldown: 0,
       pendingAttack: null,
