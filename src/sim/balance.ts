@@ -13,7 +13,7 @@ export const WORLD_SEED = 20261;
 export const WORLD_WIDTH = 124;
 export const WORLD_HEIGHT = 84;
 /** How many monsters live in each region of the open world. */
-export const REGION_MONSTERS = { pasture: 40, moor: 46, hollow: 42, thicket: 34 } as const;
+export const REGION_MONSTERS = { pasture: 40, moor: 46, hollow: 42, thicket: 28 } as const;
 /** No two monsters make their home closer than this. */
 export const MONSTER_SPACING = 2.4;
 export const DUNGEON_SIZE = 24;
