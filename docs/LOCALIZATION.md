@@ -27,8 +27,8 @@
 ## Правила
 
 - **Ключи:** `раздел.имя` в camelCase, например `hud.newDungeon`, `confirm.newDungeon.yes`.
-  Раздел — место в интерфейсе (`hud`, `quick`, `skills`, `inventory`, `tooltip`, `shop`, `log`, `prompt`, `toast`, `death`,
-  `error`) или вид данных (`item`, `slot`, `grade`, `skill`, `skillInfo`, `zone`), не тип элемента.
+  Раздел — место в интерфейсе (`hud`, `quick`, `skills`, `inventory`, `tooltip`, `shop`, `trainer`, `forge`, `log`, `prompt`, `toast`, `death`,
+  `error`) или вид данных (`item`, `slot`, `grade`, `skill`, `skillInfo`, `zone`, `npc`), не тип элемента.
   Ключ описывает смысл, а не текст.
 - **В коде** ключ всегда пишется строковым литералом: `i18n.t('hud.hint')`,
   `hud.toast('toast.saveDamaged')`, в HTML — `data-i18n="hud.hint"`. Собирать ключ из
@@ -42,9 +42,12 @@
 - **Названия предметов, слотов, грейдов и умений.** Правила знают только ID. Ключ по ID
   берётся из таблиц в `src/client/itemText.ts` (`ITEM_NAME`, `SLOT_NAME`, `GRADE_NAME`)
   и `src/client/skillText.ts` (`SKILL_NAME`, `SKILL_INFO`), названия регионов —
-  в `src/client/zoneText.ts` (`REGION_NAME`), где он
+  в `src/client/zoneText.ts` (`REGION_NAME`), жителей — в `src/client/npcText.ts`
+  (`NPC_NAME`), где он
   записан целиком: `ironSword: 'item.ironSword'`. Названия предметов — в словарной форме;
   фразы вокруг них строятся так, чтобы эта форма подходила («Подобрано: Железный меч»).
+- **Один термин — одно слово.** Усиление экипировки везде называется «закалка»
+  (англ. *tempering*): в названиях свитков, кнопках, репликах кузнеца и сообщениях.
 - **Названия языков** в переключателе (`English`, `Русский`) не переводятся и лежат в
   `LOCALES` в `src/i18n/index.ts`.
 - **Правила игры и сейвы** не содержат текстов: только ID и числа. Если правилам нужно
