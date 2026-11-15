@@ -65,6 +65,9 @@ export interface Player {
   skills: SkillId[];
   /** Recipes the hero has learned from recipe items. */
   recipes: RecipeId[];
+  /** How many monsters the hero has killed in a row without a long pause, and the ticks left to continue the run. */
+  streak: number;
+  streakTicks: number;
   /** Monsters killed by the hero's own hand, by kind: the measure of hunting mastery. */
   kills: Record<MonsterKind, number>;
   /** Ticks of quickened walking left, and how much quicker. */
@@ -334,6 +337,8 @@ export function createWorld(
       hasteFactor: 1,
       skills: [...(character.skills ?? [])],
       recipes: [...(character.recipes ?? [])],
+      streak: 0,
+      streakTicks: 0,
       kills: { wolfPup: 0, wolf: 0, boar: 0, tusker: 0, grunt: 0, ...character.kills },
       chargesOn: false,
       potionCooldown: 0,

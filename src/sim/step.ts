@@ -210,6 +210,10 @@ export function step(world: World, commands: readonly Command[] = []): void {
 
     if (player.attackCooldown > 0) player.attackCooldown -= 1;
     if (player.potionCooldown > 0) player.potionCooldown -= 1;
+    if (player.streakTicks > 0) {
+      player.streakTicks -= 1;
+      if (player.streakTicks === 0) player.streak = 0;
+    }
     if (player.hasteTicks > 0) player.hasteTicks -= 1;
     for (const id of SKILL_IDS) {
       if (player.skillCooldowns[id] > 0) player.skillCooldowns[id] -= 1;

@@ -1,15 +1,16 @@
 import Phaser from 'phaser';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Npc, type Point, type Quality, type SkillId, type World, type ZoneKind,
-  ITEMS, PLAYER_ATTACK_ARC, SKILLS, classSkills, weaponInHand, PLAYER_ATTACK_RANGE, TICK_MS, TILE_FLOOR, TILE_ROCK, TILE_RUIN, TILE_WATER, fractal2,
+  ITEMS, isUnique, PLAYER_ATTACK_ARC, SKILLS, classSkills, weaponInHand, PLAYER_ATTACK_RANGE, TICK_MS, TILE_FLOOR, TILE_ROCK, TILE_RUIN, TILE_WATER, fractal2,
   isAlive, isMoving, isRoad, isWalkable, regionAt, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { QUALITY_COLOR } from './itemText';
+import { sound, unlockSound } from './sound';
 import { WATER_COLOR } from './zoneText';
 import { QUICK_KEYS } from './hotbar';
 import { NPC_LOOK } from './npcText';
-import { type AnimationName, HERO_SHEET, MONSTER_SHEET, NPC_SHEET, createAnimations, createCharacter, directionOf, hasSheet, playCharacter, preloadSheets } from './sheets';
+import { type AnimationName, MONSTER_SHEET, NPC_SHEET, createAnimations, createCharacter, directionOf, hasAnimation, hasSheet, heroLook, heroSheet, playCharacter, preloadSheets } from './sheets';
 import { SKILL_SLOTS } from './skillText';
 import { drawHeroFigure, drawMonsterFigure, drawNpcFigure, drawShadow, drawWeapon } from './sprites';
 import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
@@ -70,6 +71,8 @@ export interface SceneEvents {
   onSkillDenied(id: SkillId, reason: 'locked' | 'unlearned' | 'cooldown' | 'mana'): void;
   onPickup(itemId: ItemId, count: number, quality: Quality | null): void;
   onXp(amount: number): void;
+  /** The words for a run of kills, like "Streak 4: +9% experience". */
+  streakText(streak: number): string;
   onInventoryFull(): void;
   onToggleInventory(): void;
   onInteract(): void;
@@ -99,6 +102,8 @@ interface MonsterSprite {
   bar: Phaser.GameObjects.Graphics;
   previous: Point;
   lastHp: number;
+  /** What bleeds out of it when it is hit. */
+  blood: number;
 }
 
 /**
@@ -142,6 +147,11 @@ export class DungeonScene extends Phaser.Scene {
   private swing = 0;
   private targetRing!: Phaser.GameObjects.Graphics;
   private targetId: number | null = null;
+  /** The monster the hero has been told to keep fighting: he walks up to it and strikes until one of them falls. */
+  private lockedId: number | null = null;
+  private lockTimer = 0;
+  private enchantGlow: Phaser.GameObjects.Graphics | null = null;
+  private shownEnchant = -1;
   private targetUntil = 0;
   private shownTarget = '';
   private marker!: Phaser.GameObjects.Graphics;
@@ -170,14 +180,23 @@ export class DungeonScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      unlockSound();
       if (this.paused || !this.isOnGame(pointer)) return;
       this.holdTimer = 0;
-      if (this.isMoveOrder(pointer)) this.orderMoveTo(pointer);
-      else this.orderAttackAt(pointer);
+      if (this.isMoveOrder(pointer)) {
+        this.lockedId = null;
+        this.orderMoveTo(pointer);
+        return;
+      }
+      // A click on a monster picks it as the target: the hero goes after it and keeps striking by himself.
+      const picked = this.monsterUnder(pointer);
+      this.lockedId = picked?.id ?? null;
+      if (!picked) this.orderAttackAt(pointer);
     });
 
     // Listening on the window keeps controls working even when a HUD button has focus.
     const onKeyDown = (event: KeyboardEvent) => {
+      unlockSound();
       const skill = SKILL_SLOT_BY_KEY.get(event.code);
       const command = COMMAND_KEYS[event.code];
       const known =
@@ -255,6 +274,7 @@ export class DungeonScene extends Phaser.Scene {
     this.savedRevision = world.player.revision;
     this.lastStats = '';
     this.heldKeys.clear();
+    this.lockedId = null;
     this.marker.setVisible(false);
     for (const object of this.mapObjects) object.destroy();
     this.cameras.main.setBackgroundColor(world.zone === 'dungeon' ? 0x12141a : 0x16201a);
@@ -272,7 +292,7 @@ export class DungeonScene extends Phaser.Scene {
     this.shownLook = '';
     this.placeHero(world.player.pos);
     this.heroAction = isAlive(world) ? null : { animation: 'death', until: Infinity };
-    this.hero.setAlpha(isAlive(world) || hasSheet(this, HERO_SHEET[world.player.cls]) ? 1 : 0.35);
+    this.hero.setAlpha(isAlive(world) || hasSheet(this, heroSheet(world.player.cls, 0)) ? 1 : 0.35);
     this.cameras.main.centerOn(this.hero.x, this.hero.y);
     this.reportStats();
   }
@@ -384,11 +404,90 @@ export class DungeonScene extends Phaser.Scene {
           this.orderMoveTo(pointer);
         }
       }
-    } else if (held && pointer.leftButtonDown() && this.world.player.attackCooldown === 0) {
+    } else if (held && pointer.leftButtonDown() && this.lockedId === null && this.world.player.attackCooldown === 0) {
       this.orderAttackAt(pointer);
     }
-    if (this.heldKeys.has(ATTACK_KEY) && this.world.player.attackCooldown === 0 && !this.peaceful) {
-      this.orderAutoAttack();
+    // Space picks the nearest monster as the target, like a click on it would.
+    if (this.heldKeys.has(ATTACK_KEY) && !this.peaceful && this.lockedMonster() === null) {
+      const nearest = this.nearestMonster(AUTO_AIM_RANGE + 6);
+      if (nearest) this.lockedId = nearest.id;
+      else if (this.world.player.attackCooldown === 0) this.orderAutoAttack();
+    }
+    // Taking the hero by the reins (walking keys) calls the fight off.
+    if (this.hasDirectionKeys()) this.lockedId = null;
+    this.fightLocked(delta);
+  }
+
+  private lockedMonster(): Monster | null {
+    if (this.lockedId === null) return null;
+    return this.world.monsters.find((monster) => monster.id === this.lockedId) ?? null;
+  }
+
+  private nearestMonster(within: number, hostileOnly = false): Monster | null {
+    const { pos } = this.world.player;
+    let best: Monster | null = null;
+    let bestDistance = within;
+    for (const monster of this.world.monsters) {
+      if (hostileOnly && !monster.aggro) continue;
+      const distance = Math.hypot(monster.pos.x - pos.x, monster.pos.y - pos.y);
+      if (distance < bestDistance) {
+        best = monster;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  private monsterUnder(pointer: Phaser.Input.Pointer): Monster | null {
+    const cursor = this.pointerInWorld(pointer).world;
+    let best: Monster | null = null;
+    let bestDistance = 0.9;
+    for (const monster of this.world.monsters) {
+      // The picture stands above the tile, so the middle of the body is a little "up" from its feet.
+      const distance = Math.min(
+        Math.hypot(monster.pos.x - cursor.x, monster.pos.y - cursor.y),
+        Math.hypot(monster.pos.x - 0.45 - cursor.x, monster.pos.y - 0.45 - cursor.y),
+      );
+      if (distance < bestDistance) {
+        best = monster;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Keeps fighting the picked monster: walks into reach, strikes whenever the
+   * weapon is ready, and when the monster falls turns to whoever else is
+   * attacking. This is only a hand on the same controls a player has.
+   */
+  private fightLocked(delta: number): void {
+    const { player } = this.world;
+    if (this.lockedId === null) return;
+    if (!isAlive(this.world) || this.peaceful) {
+      this.lockedId = null;
+      return;
+    }
+    let target = this.lockedMonster();
+    if (!target) {
+      // The target is dead or gone: defend against the next attacker, if there is one.
+      target = this.nearestMonster(8, true);
+      this.lockedId = target?.id ?? null;
+      if (!target) return;
+    }
+    const dx = target.pos.x - player.pos.x;
+    const dy = target.pos.y - player.pos.y;
+    const distance = Math.hypot(dx, dy);
+    const held = weaponInHand(player);
+    const reach = held === 'bow' ? 6.5 : held === 'staff' ? 5.5 : PLAYER_ATTACK_RANGE + 0.15;
+    this.lockTimer += delta;
+    if (distance <= reach) {
+      // Stand and strike.
+      if (isMoving(this.world)) this.pending.push({ type: 'moveTo', x: player.pos.x, y: player.pos.y });
+      if (player.attackCooldown === 0 && player.pendingAttack === null) this.pending.push({ type: 'attack', dx, dy });
+    } else if (this.lockTimer >= 200) {
+      this.lockTimer = 0;
+      this.pending.push({ type: 'moveTo', x: target.pos.x, y: target.pos.y });
     }
   }
 
@@ -489,9 +588,13 @@ export class DungeonScene extends Phaser.Scene {
       case 'playerSwing':
         this.showSwing(event.dir, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, event.charged ? CHARGE_COLOR : 0xffffff);
         this.swingBlade();
+        sound.swing();
+        if (event.charged) this.showChargeBurst(event.dir);
         return false;
       case 'playerShot':
         this.swingBlade();
+        sound.shot(this.world.player.cls === 'mage');
+        if (event.charged) this.showChargeBurst(event.dir);
         return false;
       case 'projectileEnded': {
         const at = tileToScreen(event.pos.x, event.pos.y);
@@ -521,8 +624,10 @@ export class DungeonScene extends Phaser.Scene {
         return false;
       case 'xpGained':
         this.events_.onXp(event.amount);
+        if (this.world.player.streak >= 2) this.floatText(this.hero.x, this.hero.y - 86, this.events_.streakText(this.world.player.streak), '#e8c36a');
         return false;
       case 'levelUp':
+        sound.levelUp();
         this.showRing(0xe8c36a);
         this.events_.onLevelUp(event.level, event.unlocked);
         return true;
@@ -530,6 +635,7 @@ export class DungeonScene extends Phaser.Scene {
         this.events_.onSkillDenied(event.id, event.reason);
         return false;
       case 'itemUsed':
+        sound.potion();
         return true;
       case 'bought':
       case 'sold':
@@ -567,6 +673,9 @@ export class DungeonScene extends Phaser.Scene {
         this.floatNumber(at.x, at.y - (event.crit ? 52 : 40), event.damage, event.crit ? '#ff9a3c' : '#ffe9a8', event.crit);
         if (event.crit) this.cameras.main.shake(60, 0.0025);
         const sprite = this.monsterSprites.get(event.id);
+        this.showBlood(at, sprite?.blood ?? 0x9c1f1a, event.crit || event.died);
+        sound.hit(event.crit);
+        if (event.died) sound.kill();
         if (sprite) this.flash(sprite.container);
         if (event.died && sprite?.sprite) this.showFallen(sprite, at);
         this.showSparks(at.x, at.y - 16, 0xfff0c0);
@@ -578,6 +687,8 @@ export class DungeonScene extends Phaser.Scene {
       case 'monsterWindup':
         return false; // Drawn every frame from the monster's state.
       case 'playerHit':
+        sound.hurt();
+        this.showBlood({ x: this.hero.x, y: this.hero.y }, 0x9c1f1a, false);
         this.floatNumber(this.hero.x, this.hero.y - 60, event.damage, '#ff7a6b');
         this.flash(this.hero);
         this.heroActs('hit', 250);
@@ -585,6 +696,8 @@ export class DungeonScene extends Phaser.Scene {
         this.cameras.main.shake(90, 0.004);
         return false;
       case 'playerDied':
+        sound.death();
+        this.lockedId = null;
         this.marker.setVisible(false);
         this.heroAction = { animation: 'death', until: Infinity };
         // The fallen sprite lies on the ground; a figure drawn from shapes is faded instead.
@@ -600,6 +713,9 @@ export class DungeonScene extends Phaser.Scene {
       case 'lootDropped':
         return false; // Drawn every frame from the world's loot list.
       case 'itemPicked':
+        if (event.itemId === 'coins') sound.coins();
+        else if (event.quality === 'rare' || event.quality === 'epic' || isUnique(event.itemId)) sound.treasure();
+        else sound.pickup();
         this.events_.onPickup(event.itemId, event.count, event.quality ?? null);
         return true;
       case 'inventoryFull':
@@ -636,10 +752,14 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private floatNumber(x: number, y: number, value: number, color: string, big = false): void {
+    this.floatText(x, y, this.events_.formatNumber(value), color, big ? 26 : 18);
+  }
+
+  private floatText(x: number, y: number, words: string, color: string, size = 13): void {
     const text = this.add
-      .text(x, y, this.events_.formatNumber(value), {
+      .text(x, y, words, {
         fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-        fontSize: big ? '26px' : '18px',
+        fontSize: `${size}px`,
         fontStyle: 'bold',
         color,
         stroke: '#12141a',
@@ -661,6 +781,81 @@ export class DungeonScene extends Phaser.Scene {
       this.flashing.delete(target);
       if (target.active) target.setAlpha(restore);
     });
+  }
+
+  /**
+   * Blood: drops fly out of the wound and fall, and a stain is left on the
+   * ground for a while. Cosmetic only, so it may use the browser's own randomness.
+   */
+  private showBlood(at: Point, color: number, heavy: boolean): void {
+    const drops = heavy ? 12 : 6;
+    for (let i = 0; i < drops; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const reach = (heavy ? 26 : 16) * (0.4 + Math.random() * 0.6);
+      const drop = this.add.circle(at.x, at.y - 22, 1.2 + Math.random() * 1.8, color).setDepth(EFFECT_DEPTH - 1);
+      this.tweens.add({
+        targets: drop,
+        x: at.x + Math.cos(angle) * reach,
+        duration: 300 + Math.random() * 140,
+        ease: 'Quad.easeOut',
+      });
+      // Up a little, then down to the ground.
+      this.tweens.add({
+        targets: drop,
+        y: { from: at.y - 22, to: at.y - 2 + Math.sin(angle) * reach * 0.4 },
+        duration: 300 + Math.random() * 140,
+        ease: 'Back.easeIn',
+        onComplete: () => drop.destroy(),
+      });
+    }
+    const stain = this.add.graphics({ x: at.x + (Math.random() - 0.5) * 14, y: at.y + (Math.random() - 0.5) * 6 }).setDepth(-900);
+    stain.fillStyle(color, 0.5).fillEllipse(0, 0, heavy ? 30 : 16, heavy ? 13 : 7);
+    stain.fillStyle(color, 0.4).fillEllipse(heavy ? 12 : 7, 3, 9, 4).fillEllipse(-8, -3, 7, 3);
+    this.mapObjects.push(stain);
+    this.tweens.add({ targets: stain, alpha: 0, delay: 6000, duration: 4000, onComplete: () => stain.active && stain.destroy() });
+  }
+
+  /**
+   * A tempered weapon glows: faintly from +3, stronger with every level, and
+   * its colour deepens from blue through violet to red-gold at the top.
+   */
+  private showEnchantGlow(level: number): void {
+    if (level === this.shownEnchant) return;
+    this.shownEnchant = level;
+    this.enchantGlow?.destroy();
+    this.enchantGlow = null;
+    if (level < 3) return;
+    const color = level >= 9 ? 0xffb347 : level >= 7 ? 0xff5a4a : level >= 5 ? 0xa56bff : 0x4f9dff;
+    const strength = Math.min(1, (level - 2) / 8);
+    const glow = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
+    for (let i = 5; i >= 1; i--) glow.fillStyle(color, 0.05 + strength * 0.07).fillEllipse(0, -30, 16 + i * (9 + strength * 6), 22 + i * (11 + strength * 7));
+    glow.fillStyle(0xffffff, 0.12 + strength * 0.2).fillEllipse(0, -30, 12, 20);
+    this.hero.addAt(glow, 1);
+    this.enchantGlow = glow;
+    this.tweens.add({ targets: glow, alpha: { from: 0.55, to: 1 }, duration: 900 - strength * 400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+  }
+
+  /** A weapon charge going off: a bright streak along the blow and a ring of sparks at the weapon. */
+  private showChargeBurst(dir: Point): void {
+    sound.charge();
+    const aim = tileToScreen(dir.x, dir.y);
+    const length = Math.hypot(aim.x, aim.y) || 1;
+    const ux = aim.x / length;
+    const uy = aim.y / length;
+    const x = this.hero.x + ux * 14;
+    const y = this.hero.y - 30 + uy * 14;
+    const flash = this.add.graphics({ x, y }).setDepth(EFFECT_DEPTH).setBlendMode(Phaser.BlendModes.ADD);
+    flash.fillStyle(0xffffff, 0.95).fillCircle(0, 0, 9);
+    flash.fillStyle(CHARGE_COLOR, 0.55).fillCircle(0, 0, 20);
+    flash.lineStyle(3, 0xffffff, 0.9).lineBetween(0, 0, ux * 62, uy * 62);
+    flash.lineStyle(8, CHARGE_COLOR, 0.35).lineBetween(0, 0, ux * 62, uy * 62);
+    this.tweens.add({ targets: flash, alpha: 0, scale: 1.5, duration: 190, ease: 'Quad.easeOut', onComplete: () => flash.destroy() });
+    for (let i = 0; i < 10; i++) {
+      const angle = Math.atan2(uy, ux) + (Math.random() - 0.5) * 1.6;
+      const spark = this.add.rectangle(x, y, 2.5, 2.5, i % 2 ? 0xffffff : CHARGE_COLOR).setDepth(EFFECT_DEPTH).setBlendMode(Phaser.BlendModes.ADD);
+      const reach = 30 + Math.random() * 46;
+      this.tweens.add({ targets: spark, x: x + Math.cos(angle) * reach, y: y + Math.sin(angle) * reach, alpha: 0, duration: 240 + Math.random() * 160, ease: 'Quad.easeOut', onComplete: () => spark.destroy() });
+    }
   }
 
   private showPuff(x: number, y: number): void {
@@ -718,7 +913,10 @@ export class DungeonScene extends Phaser.Scene {
   private animateHero(): void {
     const { player } = this.world;
     const { facing, chargesOn, equipment, race, cls } = player;
-    const sheet = HERO_SHEET[cls];
+    this.showEnchantGlow(player.equipment.weapon ? player.equipmentEnchant.weapon : 0);
+    // What the hero wears on the body decides which of the class's looks is shown.
+    const wanted = heroSheet(cls, heroLook(equipment.armor));
+    const sheet = hasSheet(this, wanted) ? wanted : heroSheet(cls, 0);
     if (hasSheet(this, sheet)) {
       if (sheet !== this.heroSheet) {
         this.heroSprite?.destroy();
@@ -731,7 +929,10 @@ export class DungeonScene extends Phaser.Scene {
       const sprite = this.heroSprite as Phaser.GameObjects.Sprite;
       if (this.heroAction && this.heroAction.animation !== 'death' && performance.now() >= this.heroAction.until) this.heroAction = null;
       const animation: AnimationName = !isAlive(this.world) ? 'death' : this.heroAction ? this.heroAction.animation : isMoving(this.world) ? 'run' : 'idle';
-      playCharacter(this, sprite, sheet, animation, directionOf(facing.x, facing.y));
+      // A look without a death of its own: the hero is laid on the ground and dimmed.
+      const fallen = animation === 'death' && !hasAnimation(this, sheet, 'death');
+      sprite.setAngle(fallen ? 82 : 0).setAlpha(fallen ? 0.75 : 1);
+      playCharacter(this, sprite, sheet, fallen ? 'idle' : animation, directionOf(facing.x, facing.y));
       // A charged weapon gives the hero a cold glow.
       if (chargesOn) sprite.setTint(0xd8f6ff);
       else sprite.clearTint();
@@ -778,6 +979,7 @@ export class DungeonScene extends Phaser.Scene {
         }
       }
     }
+    target = this.lockedMonster() ?? target;
     if (!target && this.targetId !== null && performance.now() < this.targetUntil) {
       target = monsters.find((monster) => monster.id === this.targetId) ?? null;
     }
@@ -801,9 +1003,16 @@ export class DungeonScene extends Phaser.Scene {
   private showFallen(from: MonsterSprite, at: Point): void {
     const sheet = from.sprite?.texture.key;
     if (!sheet) return;
-    const body = createCharacter(this, sheet).setPosition(at.x, at.y).setDepth(from.container.depth);
-    playCharacter(this, body, sheet, 'death', from.direction);
-    this.tweens.add({ targets: body, alpha: 0, delay: 900, duration: 500, onComplete: () => body.destroy() });
+    const body = createCharacter(this, sheet).setPosition(at.x, at.y).setDepth(from.container.depth - 0.5);
+    // The same size as it was alive (a young one small, an elder large).
+    body.setScale(body.scaleX * Math.abs(from.figure.scaleY));
+    if (hasAnimation(this, sheet, 'death')) playCharacter(this, body, sheet, 'death', from.direction);
+    else {
+      playCharacter(this, body, sheet, 'idle', from.direction);
+      body.setAngle(80);
+    }
+    // The body lies for a moment before it fades: a kill should be seen.
+    this.tweens.add({ targets: body, alpha: 0, delay: 2200, duration: 900, onComplete: () => body.destroy() });
   }
 
   /** A few bright specks flying out from a blow. */
@@ -832,7 +1041,7 @@ export class DungeonScene extends Phaser.Scene {
     const container = this.add.container(0, 0, [figure, bar]);
     // An elder is plainly bigger than its kin.
     figure.setScale(monsterScale(monster));
-    return { container, figure, body, sprite, direction: 1, bar, previous: { ...monster.pos }, lastHp: -1 };
+    return { container, figure, body, sprite, direction: 1, bar, previous: { ...monster.pos }, lastHp: -1, blood: monster.kind === 'grunt' ? 0x5a6b3a : 0x9c1f1a };
   }
 
   private drawMonsterBody(sprite: MonsterSprite, kind: Monster['kind'], windingUp: boolean): void {

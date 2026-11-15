@@ -70,6 +70,11 @@ export const MASTERY_TIERS: readonly number[] = [10, 50, 200, 1000];
 export const MASTERY_DAMAGE = 0.05;
 /** ...and this many chances in a thousand of its rarest drop. */
 export const MASTERY_RARE = 1;
+/** A kill within this long of the previous one continues a streak... */
+export const STREAK_WINDOW = ticks(12);
+/** ...and each kill of a streak after the first adds this share of experience, up to the cap. */
+export const STREAK_XP = 0.03;
+export const STREAK_CAP = 10;
 /** Minimum time between two attacks. */
 export const PLAYER_ATTACK_COOLDOWN = ticks(0.45);
 /** Health comes back after this long without taking damage... */

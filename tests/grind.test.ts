@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parseSave, serializeWorld } from '../src/client/save';
 import {
   type ItemMods, type Monster, type World,
-  AFFIX_RANGE, CRIT_BASE, CRIT_MULTIPLIER, DROP_TABLES, ELDER, ITEMS, MASTERY_TIERS, MONSTER_KINDS, MONSTER_KIND_IDS, MONSTER_SPACING, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_SLOW, QUALITIES, QUALITY,
+  AFFIX_RANGE, CRIT_BASE, CRIT_MULTIPLIER, DROP_TABLES, ELDER, ITEMS, MASTERY_TIERS, MONSTER_KINDS, MONSTER_KIND_IDS, MONSTER_SPACING, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_SLOW, STREAK_CAP, STREAK_WINDOW, STREAK_XP, QUALITIES, QUALITY,
   addItem, affixCount, attackCooldown, createRng, createWorld, critChance, droppableEquipment, gearStats, isUnique, masteryTier, monsterMaxHp, monsterXp, newHero,
-  playerDamage, playerDefense, refreshVitals, rollMods, sellPrice, step, validMods, worthOf,
+  playerDamage, playerDefense, refreshVitals, rollMods, streakBonus, sellPrice, step, validMods, worthOf,
 } from '../src/sim';
 
 const equipment = (id: keyof typeof ITEMS) => ITEMS[id] as Extract<(typeof ITEMS)[keyof typeof ITEMS], { kind: 'equipment' }>;
@@ -265,6 +265,33 @@ describe('hunting mastery and trophies', () => {
     expect(masteryTier(world.player.kills.wolf)).toBe(1);
     expect(masteryTier(MASTERY_TIERS[MASTERY_TIERS.length - 1]!)).toBe(MASTERY_TIERS.length);
     expect(masteryTier(0)).toBe(0);
+  });
+
+  it('rewards killing without long pauses: a streak adds experience and lapses after a rest', () => {
+    const world = overworld();
+    const { map } = world;
+    for (let y = 1; y < map.height - 1; y++) for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;
+    const template = world.monsters[0] as Monster;
+    const kill = (id: number): number => {
+      world.monsters = [{ ...template, id, kind: 'tusker', level: 6, elder: false, hp: 1, pos: { x: world.player.pos.x + 1, y: world.player.pos.y }, home: { ...world.player.pos } }];
+      let gained = 0;
+      step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
+      for (let t = 0; t < 30; t++) {
+        for (const event of world.events) if (event.type === 'xpGained') gained += event.amount;
+        step(world);
+      }
+      return gained;
+    };
+    const first = kill(1);
+    const second = kill(2);
+    const third = kill(3);
+    expect(world.player.streak).toBe(3);
+    expect(second).toBeGreaterThanOrEqual(first);
+    expect(third).toBeGreaterThan(first);
+    expect(streakBonus(1)).toBe(1);
+    expect(streakBonus(1000)).toBeCloseTo(1 + STREAK_CAP * STREAK_XP);
+    for (let t = 0; t < STREAK_WINDOW + 1; t++) step(world);
+    expect(world.player.streak).toBe(0);
   });
 
   it('keeps the kill count through saving and loading', () => {

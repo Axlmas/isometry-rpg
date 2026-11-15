@@ -1,5 +1,5 @@
 import {
-  CRIT_MULTIPLIER, ELDER, ELDER_AGGRO, ELDER_CHANCE, MASTERY_DAMAGE, MASTERY_RARE, WANDER_RADIUS, WANDER_REST, WANDER_SPEED,
+  CRIT_MULTIPLIER, STREAK_CAP, STREAK_WINDOW, STREAK_XP, ELDER, ELDER_AGGRO, ELDER_CHANCE, MASTERY_DAMAGE, MASTERY_RARE, WANDER_RADIUS, WANDER_REST, WANDER_SPEED,
   MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
   MONSTER_KINDS, MONSTER_LEASH, MONSTER_RESPAWN_CLEARANCE, MONSTER_RESPAWN_TIME, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
@@ -75,6 +75,11 @@ export function buryTheDead(world: World): void {
   world.monsters = world.monsters.filter((monster) => monster.hp > 0);
 }
 
+/** What a streak of this many kills multiplies experience by. */
+export function streakBonus(streak: number): number {
+  return 1 + Math.min(STREAK_CAP, Math.max(0, streak - 1)) * STREAK_XP;
+}
+
 /**
  * The hero damages one monster: rolls the weapon's damage, applies the
  * multiplier and pushes the monster along `push`; a critical blow also interrupts its attack.
@@ -110,7 +115,10 @@ export function hitMonster(world: World, monster: Monster, multiplier: number, p
   const tier = masteryTier(player.kills[monster.kind]);
   if (tier > before) world.events.push({ type: 'masteryUp', kind: monster.kind, tier });
   player.revision += 1;
-  return monsterXp(monster.level, monster.kind, monster.elder);
+  // Killing without long pauses pays: each kill of a streak gives a little more experience.
+  player.streak = player.streakTicks > 0 ? player.streak + 1 : 1;
+  player.streakTicks = STREAK_WINDOW;
+  return Math.round(monsterXp(monster.level, monster.kind, monster.elder) * streakBonus(player.streak));
 }
 
 /**

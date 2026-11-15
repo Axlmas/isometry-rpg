@@ -1,3 +1,4 @@
+import { soundEnabled } from './sound';
 import { type I18n, type MessageKey, LOCALES } from '../i18n';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -194,6 +195,7 @@ export class Hud {
       node.textContent = i18n.t(node.dataset.i18n as MessageKey);
     }
     element('language').textContent = i18n.t('hud.language', { language: info?.name ?? i18n.locale });
+    element('sound').textContent = soundEnabled() ? i18n.t('hud.soundOn') : i18n.t('hud.soundOff');
     const status = element('save-status');
     status.textContent = i18n.t(this.canSave ? 'hud.autosave' : 'hud.autosaveOff');
     status.classList.toggle('warning', !this.canSave);

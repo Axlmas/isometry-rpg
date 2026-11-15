@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import {
-  type ClassId, type GameEvent, type ItemId, type RaceId, type Region, type World, type ZoneKind, MASTERY_DAMAGE, MAX_LEVEL, RECIPES, SKILLS,
+  type ClassId, type GameEvent, type ItemId, type RaceId, type Region, type World, type ZoneKind, MASTERY_DAMAGE, streakBonus, MAX_LEVEL, RECIPES, SKILLS,
   SHOP_STOCK, characterOf, createWorld, isAlive, minesLevelFor, nearestExit, nearestNpc, newHero, regionAt, travelerOf, xpToNextLevel,
 } from '../sim';
 import { CreationScreen } from './creation';
@@ -18,6 +18,7 @@ import { ShopPanel } from './shopPanel';
 import { Hotbar } from './hotbar';
 import { Minimap } from './minimap';
 import { MONSTER_NAME } from './npcText';
+import { setSoundEnabled, soundEnabled, unlockSound } from './sound';
 import { QUALITY_NAME } from './itemText';
 import { TrainerPanel } from './trainerPanel';
 import { CLASS_NAME, RACE_NAME, SKILL_NAME } from './skillText';
@@ -291,6 +292,7 @@ const scene = new DungeonScene(world, {
     else hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
   },
   onXp: (amount) => hud.log(i18n.t('log.xp', { amount })),
+  streakText: (streak) => i18n.t('hud.streak', { streak, bonus: Math.round((streakBonus(streak) - 1) * 100) }),
   onInventoryFull: () => hud.log(i18n.t('log.full'), true),
   onToggleInventory: () => inventory.toggle(),
   onInteract: interact,
@@ -377,3 +379,15 @@ const game = new Phaser.Game({
 });
 
 window.addEventListener('resize', () => game.scale.resize(window.innerWidth * RENDER_SCALE, window.innerHeight * RENDER_SCALE));
+
+// The sound switch: its label says what it will do, in the player's language.
+const soundButton = document.getElementById('sound') as HTMLButtonElement;
+const labelSound = (): void => {
+  soundButton.textContent = soundEnabled() ? i18n.t('hud.soundOn') : i18n.t('hud.soundOff');
+};
+soundButton.addEventListener('click', () => {
+  setSoundEnabled(!soundEnabled());
+  unlockSound();
+  labelSound();
+});
+labelSound();
