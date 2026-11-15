@@ -226,6 +226,9 @@ export class DungeonScene extends Phaser.Scene {
   /** Replaces the world being shown, for example when a new dungeon starts. */
   setWorld(world: World): void {
     this.world = world;
+    // Asked before the pictures have loaded (a quick click on a slow connection):
+    // remember the world, and `create` will draw it when the scene is ready.
+    if (!this.marker) return;
     this.pending = [];
     this.accumulator = 0;
     this.lastFrameAt = performance.now();
