@@ -159,3 +159,9 @@ button.small { min-block-size: 22px; padding: 2px 8px; font-size: 12px; }
 .overlay button { margin-block-start: 14px; min-block-size: 30px; padding: 4px 16px; }
 #death { background: rgba(30, 0, 0, 0.6); }
 #death-xp { margin-block-start: 6px; color: var(--warning); }
+
+/* Tabs in a window */
+.tabs { display: flex; gap: 2px; margin-block: 2px 4px; border-block-end: 1px solid var(--frame); }
+.tabs button { border-block-end: none; border-radius: 2px 2px 0 0; background: #17181e; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: linear-gradient(#3a321d, #1f1b10); color: var(--accent); border-color: var(--frame-light); }
+[role="tabpanel"] { display: flex; flex-direction: column; gap: 4px; }

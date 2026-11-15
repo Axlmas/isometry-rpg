@@ -1,11 +1,11 @@
 import {
-  type Character, type EquipSlot, type ItemId, type ItemStack, type SkillId, type World, type ZoneKind,
-  ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, SKILLS, SKILL_IDS, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
-  circleFree, createWorld, isItemId, isSkillId, isZoneKind, maxStackOf, newCharacter, xpToNextLevel,
+  type Character, type EquipSlot, type ItemId, type ItemStack, type RecipeId, type SkillId, type World, type ZoneKind,
+  ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, RECIPES, SKILLS, SKILL_IDS, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
+  circleFree, createWorld, isItemId, isRecipeId, isSkillId, isZoneKind, maxStackOf, newCharacter, xpToNextLevel,
 } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -43,6 +43,8 @@ interface SaveData {
   enchants: Record<EquipSlot, number>;
   /** Skills learned from the trainer. */
   skills: SkillId[];
+  /** Recipes learned from recipe items. */
+  recipes: RecipeId[];
   /** Items lying on the floor. */
   loot: Array<{ id: ItemId; count: number; enchant?: number; x: number; y: number }>;
 }
@@ -94,6 +96,7 @@ export function serializeWorld(world: World): string {
     equipment: { ...world.player.equipment },
     enchants: { ...world.player.equipmentEnchant },
     skills: [...world.player.skills],
+    recipes: [...world.player.recipes],
     loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, ...(loot.enchant ? { enchant: loot.enchant } : {}), x: loot.pos.x, y: loot.pos.y })),
   };
   return JSON.stringify(data);
@@ -137,6 +140,8 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
       enchants: { weapon: 0, helmet: 0, armor: 0, boots: 0 },
     };
   }
+  // v10 added crafting; nobody has learned a recipe yet.
+  if (current.version === 9) current = { ...current, version: 10, recipes: [] };
   return current;
 }
 
@@ -159,7 +164,7 @@ function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
 }
 
 function parseCharacter(data: Record<string, unknown>): Character | null {
-  const { level, xp, coins, inventory, equipment, enchants, skills } = data;
+  const { level, xp, coins, inventory, equipment, enchants, skills, recipes } = data;
   if (!isInt(level) || level < 1 || level > MAX_LEVEL) return null;
   // Experience at or above the next level's threshold cannot come from normal play.
   if (!isInt(xp) || xp < 0 || (level < MAX_LEVEL ? xp >= xpToNextLevel(level) : xp !== 0)) return null;
@@ -196,7 +201,10 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
   // A skill can only have been learned once, and not before its level.
   if (!Array.isArray(skills) || new Set(skills).size !== skills.length) return null;
   if (!skills.every((id) => isSkillId(id) && SKILLS[id].unlockLevel <= level)) return null;
-  return { level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, skills: skills as SkillId[] };
+  // Only recipes that have to be learned can be in the list, each once.
+  if (!Array.isArray(recipes) || new Set(recipes).size !== recipes.length) return null;
+  if (!recipes.every((id) => isRecipeId(id) && RECIPES[id].mustLearn)) return null;
+  return { level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, skills: skills as SkillId[], recipes: recipes as RecipeId[] };
 }
 
 /** Saved data can be edited or corrupted, so every field is checked. */

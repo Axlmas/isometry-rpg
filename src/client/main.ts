@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import {
-  type GameEvent, type Region, type World, type ZoneKind, MAX_LEVEL, SKILLS,
+  type GameEvent, type ItemId, type Region, type World, type ZoneKind, MAX_LEVEL, RECIPES, SKILLS,
   SHOP_STOCK, characterOf, createWorld, isAlive, minesLevelFor, nearestExit, nearestNpc, regionAt, travelerOf, xpToNextLevel,
 } from '../sim';
 import { DungeonScene, RENDER_SCALE } from './DungeonScene';
@@ -180,6 +180,24 @@ function showNotice(event: GameEvent): void {
       return;
     case 'crystallized':
       if (event.itemId !== 'coins') hud.log(i18n.t('log.crystallized', { item: itemName(i18n, event.itemId), crystals: event.crystals }));
+      return;
+    case 'recipeLearned':
+      hud.log(i18n.t('log.recipeLearned', { item: itemName(i18n, RECIPES[event.recipe].output.itemId as Exclude<ItemId, 'coins'>) }));
+      return;
+    case 'recipeDenied':
+      hud.log(i18n.t('log.recipeKnown'), true);
+      return;
+    case 'crafted':
+      if (event.itemId !== 'coins') hud.log(i18n.t('log.crafted', { item: itemName(i18n, event.itemId), count: event.count }));
+      return;
+    case 'craftFailed':
+      hud.log(i18n.t('log.craftFailed', { item: itemName(i18n, RECIPES[event.recipe].output.itemId as Exclude<ItemId, 'coins'>) }), true);
+      return;
+    case 'craftDenied':
+      if (event.reason === 'far') hud.log(i18n.t('log.tooFar'), true);
+      else if (event.reason === 'full') hud.log(i18n.t('log.noRoom'), true);
+      else if (event.reason === 'unknown') hud.log(i18n.t('log.recipeUnknown'), true);
+      else hud.log(i18n.t('log.noMaterials'), true);
       return;
     case 'crystallizeDenied':
       if (event.reason === 'far') hud.log(i18n.t('log.tooFar'), true);

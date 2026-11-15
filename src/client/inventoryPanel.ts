@@ -171,6 +171,9 @@ export class InventoryPanel {
     if (def.kind === 'consumable' && def.effect.kind !== 'charge') {
       return { command: { type: 'use', itemId: item.itemId }, label: i18n.t('inventory.use'), hint: i18n.t('tooltip.use') };
     }
+    if (def.kind === 'recipe') {
+      return { command: { type: 'use', itemId: item.itemId }, label: i18n.t('inventory.learn'), hint: i18n.t('tooltip.learn') };
+    }
     return null;
   }
 

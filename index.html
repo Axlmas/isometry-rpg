@@ -90,12 +90,23 @@
       <button id="forge-close" type="button" class="small" data-i18n="inventory.close"></button>
     </div>
     <p id="forge-coins" class="coins"></p>
-    <p class="item-detail" data-i18n="forge.intro"></p>
-    <h3 data-i18n="forge.items"></h3>
-    <p id="forge-empty" class="item-empty" data-i18n="forge.nothing"></p>
-    <ul id="forge-items" class="item-list"></ul>
-    <h3 data-i18n="forge.scrolls"></h3>
-    <ul id="forge-stock" class="item-list"></ul>
+    <div class="tabs" role="tablist">
+      <button id="forge-tab-temper" type="button" role="tab" class="small" aria-controls="forge-temper" data-i18n="forge.tabTemper"></button>
+      <button id="forge-tab-craft" type="button" role="tab" class="small" aria-controls="forge-craft" data-i18n="forge.tabCraft"></button>
+      <button id="forge-tab-stock" type="button" role="tab" class="small" aria-controls="forge-stock-tab" data-i18n="forge.tabStock"></button>
+    </div>
+    <div id="forge-temper" role="tabpanel">
+      <p class="item-detail" data-i18n="forge.intro"></p>
+      <p id="forge-empty" class="item-empty" data-i18n="forge.nothing"></p>
+      <ul id="forge-items" class="item-list"></ul>
+    </div>
+    <div id="forge-craft" role="tabpanel" hidden>
+      <p class="item-detail" data-i18n="craft.intro"></p>
+      <ul id="forge-recipes" class="item-list"></ul>
+    </div>
+    <div id="forge-stock-tab" role="tabpanel" hidden>
+      <ul id="forge-stock" class="item-list"></ul>
+    </div>
   </aside>
 
   <div id="banner" role="status" hidden>

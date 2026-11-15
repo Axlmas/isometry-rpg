@@ -1,7 +1,7 @@
 import type { I18n } from '../i18n';
-import { type ItemId, ITEMS, enchantBonus } from '../sim';
+import { type ItemId, ITEMS, RECIPES, enchantBonus } from '../sim';
 import { itemIcon } from './itemIcon';
-import { GRADE_COLOR, GRADE_NAME, ITEM_NAME } from './itemText';
+import { GRADE_COLOR, GRADE_NAME, ITEM_NAME, type RecipeItemId } from './itemText';
 
 export function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -18,7 +18,13 @@ export function make<K extends keyof HTMLElementTagNameMap>(tag: K, className: s
 
 /** The item's name; an enchanted item gets its level after the name, like "Iron Sword +3". */
 export function itemName(i18n: I18n, itemId: Exclude<ItemId, 'coins'>, enchant = 0): string {
-  const name = i18n.t(ITEM_NAME[itemId]);
+  const def = ITEMS[itemId];
+  // A recipe is named after what it makes: "Recipe: Chain Shirt".
+  if (def.kind === 'recipe') {
+    const made = RECIPES[def.recipe].output.itemId as Exclude<ItemId, 'coins' | RecipeItemId>;
+    return i18n.t('item.recipe', { item: i18n.t(ITEM_NAME[made]) });
+  }
+  const name = i18n.t(ITEM_NAME[itemId as Exclude<ItemId, 'coins' | RecipeItemId>]);
   return enchant > 0 ? i18n.t('item.enchanted', { item: name, level: enchant }) : name;
 }
 
@@ -33,7 +39,10 @@ export function itemEffect(i18n: I18n, itemId: ItemId, enchant = 0): string {
         : i18n.t('inventory.defense', { value: def.defense + bonus });
     }
     case 'material':
-      return itemId === 'crystalD' ? i18n.t('inventory.crystal') : i18n.t('inventory.material');
+      if (itemId === 'crystalD') return i18n.t('inventory.crystal');
+      return itemId === 'steelIngot' || itemId === 'tannedLeather' || itemId === 'cord' ? i18n.t('inventory.worked') : i18n.t('inventory.material');
+    case 'recipe':
+      return i18n.t('inventory.recipe');
     case 'scroll':
       return def.target === 'weapon' ? i18n.t('inventory.scrollWeapon') : i18n.t('inventory.scrollArmor');
     case 'consumable':

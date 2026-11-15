@@ -448,6 +448,9 @@ export class DungeonScene extends Phaser.Scene {
         this.events_.onNotice(event);
         return true;
       case 'skillLearned':
+      case 'recipeLearned':
+      case 'crafted':
+      case 'craftFailed':
       case 'enchanted':
       case 'enchantFailed':
       case 'crystallized':
@@ -457,6 +460,8 @@ export class DungeonScene extends Phaser.Scene {
       case 'chargesEmpty':
       case 'tradeDenied':
       case 'learnDenied':
+      case 'recipeDenied':
+      case 'craftDenied':
       case 'enchantDenied':
       case 'crystallizeDenied':
         this.events_.onNotice(event);
@@ -764,6 +769,9 @@ export class DungeonScene extends Phaser.Scene {
     } else if (def.kind === 'material') {
       g.fillStyle(0x8a6a45).fillRoundedRect(-7, -12, 14, 13, 4);
       g.fillStyle(0x5f4830).fillRect(-4, -14, 8, 3);
+    } else if (def.kind === 'recipe') {
+      g.fillStyle(0xefe6cf).fillRect(-6, -15, 12, 15);
+      g.lineStyle(1, 0x3f6fb0, 1).lineBetween(-3, -10, 3, -10).lineBetween(-3, -6, 3, -6);
     } else if (def.kind === 'scroll') {
       g.fillStyle(0xe8dcc0).fillRoundedRect(-7, -14, 14, 14, 2);
       g.fillStyle(def.grade === 'd' ? 0x5fa8ff : 0xb89f73).fillRect(-8, -15, 16, 3).fillRect(-8, -2, 16, 3);

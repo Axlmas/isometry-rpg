@@ -42,5 +42,9 @@
   "hud.levelShort": "The level number alone, shown in a small badge.",
   "hud.hero": "Stands in for the hero's name until heroes can be named.",
   "monster.wolf": "Names of monsters, shown in the target frame. Invented for this game's world; translate the meaning.",
-  "quick.stateOn": "Whether weapon charges are switched on; last line of the hint for the F slot."
+  "quick.stateOn": "Whether weapon charges are switched on; last line of the hint for the F slot.",
+  "item.recipe": "Name of a recipe item; {item} is the name of what it makes, in dictionary form.",
+  "craft.ingredient": "One ingredient of a recipe: its name, how many the hero has and how many are needed.",
+  "craft.intro": "The blacksmith speaking.",
+  "log.crafted": "{item} is an item name in dictionary form. Phrase the message so that form fits."
 }

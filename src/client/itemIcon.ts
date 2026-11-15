@@ -43,6 +43,13 @@ const scroll = (seal: string, mark: string): string => `
 const BLADE_MARK = 'M12 20 L19 11 M11 17 L14 20';
 const SHIELD_MARK = 'M12 11 H19 V15 Q19 19 15.5 20 Q12 19 12 15 Z';
 
+/** A recipe: a page with a corner folded and a drawing of what it makes. */
+const recipePage = (mark: string): string => `
+  <path d="M8 4 H20 L25 9 V28 H8 Z" fill="#efe6cf" ${OUTLINE}/>
+  <path d="M20 4 V9 H25" fill="#cdbf9c" ${OUTLINE}/>
+  <path d="${mark}" stroke="#3f6fb0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M11 23 H22 M11 25.5 H18" stroke="#8a7c5c" stroke-width="1"/>`;
+
 const IRON = '#b8bcc6';
 const IRON_DARK = '#7f8591';
 const LEATHER = '#a8743e';
@@ -81,6 +88,13 @@ const ICONS: Record<ItemId, string> = {
   scrollArmorPlain: scroll('#cfd3dc', SHIELD_MARK),
   scrollWeaponD: scroll('#5fa8ff', BLADE_MARK),
   scrollArmorD: scroll('#5fa8ff', SHIELD_MARK),
+  steelIngot: `<path d="M6 20 L10 12 L24 12 L28 20 L24 24 L10 24 Z" fill="#aeb6c4" ${OUTLINE}/><path d="M10 12 L12 16 L26 16 L24 12 M12 16 L10 24" stroke="#12141a" stroke-width="1" fill="none"/><path d="M12 14 H22" stroke="#ffffff" stroke-width="1.2" opacity="0.7"/>`,
+  tannedLeather: `<path d="M7 9 Q7 6 10 6 H22 Q25 6 25 9 V23 Q25 26 22 26 H10 Q7 26 7 23 Z" fill="#8a5a2c" ${OUTLINE}/><path d="M7 12 H25 M7 20 H25" stroke="#5f3c1a" stroke-width="1.5"/><circle cx="16" cy="16" r="2.5" fill="#d9b24a" stroke="#12141a" stroke-width="1"/>`,
+  cord: `<ellipse cx="16" cy="16" rx="10" ry="9" fill="none" stroke="#c9b48a" stroke-width="4"/><ellipse cx="16" cy="16" rx="10" ry="9" fill="none" stroke="#12141a" stroke-width="1" stroke-dasharray="3 3"/><path d="M24 20 L28 27" stroke="#c9b48a" stroke-width="3" stroke-linecap="round"/>`,
+  recipeSoldierBlade: recipePage(BLADE_MARK),
+  recipeIronHelm: recipePage('M11 19 Q11 10 16 10 Q21 10 21 19 Z'),
+  recipeChainShirt: recipePage(SHIELD_MARK),
+  recipeIronGreaves: recipePage('M13 10 H18 V16 Q22 17 22 20 H12 Z'),
 };
 
 /** An element showing the item's picture. Purely decorative: the name is given in text elsewhere. */

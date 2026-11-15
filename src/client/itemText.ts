@@ -1,11 +1,14 @@
 import type { MessageKey } from '../i18n';
 import type { EquipSlot, Grade, ItemId } from '../sim';
 
+export type RecipeItemId = 'recipeSoldierBlade' | 'recipeIronHelm' | 'recipeChainShirt' | 'recipeIronGreaves';
+
 // The rules know items only by ID. These tables turn IDs into translation
 // keys. Keys are written out in full so the translation check can find them,
 // and the Record types make the compiler complain when an item has no name.
 
-export const ITEM_NAME: Record<Exclude<ItemId, 'coins'>, MessageKey> = {
+/** Recipe items have no entry here: their name is built from the name of what they make. */
+export const ITEM_NAME: Record<Exclude<ItemId, 'coins' | RecipeItemId>, MessageKey> = {
   leather: 'item.leather',
   ironOre: 'item.ironOre',
   coal: 'item.coal',
@@ -29,6 +32,9 @@ export const ITEM_NAME: Record<Exclude<ItemId, 'coins'>, MessageKey> = {
   scrollArmorPlain: 'item.scrollArmorPlain',
   scrollWeaponD: 'item.scrollWeaponD',
   scrollArmorD: 'item.scrollArmorD',
+  steelIngot: 'item.steelIngot',
+  tannedLeather: 'item.tannedLeather',
+  cord: 'item.cord',
 };
 
 export const SLOT_NAME: Record<EquipSlot, MessageKey> = {
