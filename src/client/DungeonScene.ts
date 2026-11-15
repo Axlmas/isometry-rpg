@@ -6,9 +6,9 @@ import {
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
-import { NPC_LOOK } from './npcText';
-import { QUICK_KEYS } from './quickBar';
+import { QUICK_KEYS } from './hotbar';
 import { SKILL_KEYS } from './skillText';
+import { drawBlade, drawMonsterFigure, drawNpcFigure, drawPerson, drawShadow } from './sprites';
 import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
 
 const WALL_HEIGHT = 30;
@@ -19,6 +19,12 @@ const HOLD_REPEAT_MS = 120;
 /** Keyboard attacks aim at the nearest monster within this distance. */
 const AUTO_AIM_RANGE = PLAYER_ATTACK_RANGE + 1;
 const EFFECT_DEPTH = 100000;
+/** Screens with more pixels per inch get a larger canvas, so the picture stays sharp. Capped to keep it fast. */
+export const RENDER_SCALE = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+/** Obstacle pictures are painted this many times larger than shown, so they stay sharp when the camera zooms in. */
+const TEXTURE_SCALE = 2;
+/** How long a monster stays the target after the hero's last hit on it. */
+const TARGET_MEMORY_MS = 5000;
 /** Colour of a blow strengthened by a weapon charge, and of the blade while charges are on. */
 const CHARGE_COLOR = 0x7fe9ff;
 
@@ -56,6 +62,8 @@ export interface SceneEvents {
   onInventoryFull(): void;
   onToggleInventory(): void;
   onInteract(): void;
+  /** The monster the hero is fighting or pointing at changed, or its health did; null when there is none. */
+  onTarget(monster: Monster | null): void;
   /** The hero walked through an exit. */
   onTravel(to: ZoneKind): void;
   /** The hero asked to rise after dying. */
@@ -68,6 +76,8 @@ export interface SceneEvents {
 
 interface MonsterSprite {
   container: Phaser.GameObjects.Container;
+  /** Holds the body so it can be mirrored and bobbed without moving the health bar. */
+  figure: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Graphics;
   bar: Phaser.GameObjects.Graphics;
   previous: Point;
@@ -98,7 +108,15 @@ export class DungeonScene extends Phaser.Scene {
   private readonly monsterSprites = new Map<number, MonsterSprite>();
   private readonly lootSprites = new Map<number, Phaser.GameObjects.Graphics>();
   private hero!: Phaser.GameObjects.Container;
+  private heroFigure!: Phaser.GameObjects.Container;
   private weapon!: Phaser.GameObjects.Graphics;
+  private weaponCharged: boolean | null = null;
+  /** Extra turn of the blade during a swing, in radians; eased back to zero. */
+  private swing = 0;
+  private targetRing!: Phaser.GameObjects.Graphics;
+  private targetId: number | null = null;
+  private targetUntil = 0;
+  private shownTarget = '';
   private marker!: Phaser.GameObjects.Graphics;
 
   constructor(world: World, events: SceneEvents) {
@@ -111,6 +129,8 @@ export class DungeonScene extends Phaser.Scene {
     this.marker = this.add.graphics().setDepth(-500).setVisible(false);
     this.marker.lineStyle(2, 0xe8c36a, 0.9).strokeEllipse(0, 0, 26, 13);
     this.marker.fillStyle(0xe8c36a, 0.35).fillEllipse(0, 0, 26, 13);
+    this.targetRing = this.add.graphics().setDepth(-450).setVisible(false);
+    this.targetRing.lineStyle(2, 0xe0503f, 0.9).strokeEllipse(0, 0, 40, 20);
     this.hero = this.createHero();
     this.cameras.main.startFollow(this.hero, false, 0.12, 0.12);
 
@@ -261,8 +281,9 @@ export class DungeonScene extends Phaser.Scene {
       x: this.previous.x + (pos.x - this.previous.x) * alpha,
       y: this.previous.y + (pos.y - this.previous.y) * alpha,
     });
-    this.drawWeapon();
+    this.animateHero();
     this.syncMonsters(alpha);
+    this.updateTarget();
     this.syncLoot();
   }
 
@@ -397,10 +418,14 @@ export class DungeonScene extends Phaser.Scene {
     switch (event.type) {
       case 'playerSwing':
         this.showSwing(event.dir, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, event.charged ? CHARGE_COLOR : 0xffffff);
+        this.swingBlade();
         return false;
       case 'skillUsed': {
         const { effect } = SKILLS[event.id];
-        if (effect.kind === 'strike') this.showSwing(event.dir, effect.arc, effect.range, event.charged ? CHARGE_COLOR : 0xffb347);
+        if (effect.kind === 'strike') {
+          this.showSwing(event.dir, effect.arc, effect.range, event.charged ? CHARGE_COLOR : 0xffb347);
+          this.swingBlade();
+        }
         return false;
       }
       case 'playerHealed':
@@ -448,6 +473,9 @@ export class DungeonScene extends Phaser.Scene {
         this.floatNumber(at.x, at.y - 40, event.damage, '#ffe9a8');
         const sprite = this.monsterSprites.get(event.id);
         if (sprite) this.flash(sprite.container);
+        this.showSparks(at.x, at.y - 16, 0xfff0c0);
+        this.targetId = event.id;
+        this.targetUntil = performance.now() + TARGET_MEMORY_MS;
         if (event.died) this.showPuff(at.x, at.y - 10);
         return event.died;
       }
@@ -456,6 +484,7 @@ export class DungeonScene extends Phaser.Scene {
       case 'playerHit':
         this.floatNumber(this.hero.x, this.hero.y - 60, event.damage, '#ff7a6b');
         this.flash(this.hero);
+        this.showSparks(this.hero.x, this.hero.y - 24, 0xff7a6b);
         this.cameras.main.shake(90, 0.004);
         return false;
       case 'playerDied':
@@ -539,8 +568,9 @@ export class DungeonScene extends Phaser.Scene {
 
   private fitCamera(): void {
     const { width, height } = this.scale;
-    const zoom = Phaser.Math.Clamp(Math.min(width, height) / 520, 0.7, 1.5);
-    this.cameras.main.setZoom(zoom);
+    // Sizes here are in screen pixels; the canvas itself is RENDER_SCALE times larger.
+    const zoom = Phaser.Math.Clamp(Math.min(width, height) / RENDER_SCALE / 600, 0.75, 1.5);
+    this.cameras.main.setZoom(zoom * RENDER_SCALE);
   }
 
   private placeHero(pos: Point): void {
@@ -551,57 +581,110 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private createHero(): Phaser.GameObjects.Container {
+    const shadow = this.add.graphics();
+    drawShadow(shadow, 30);
     const body = this.add.graphics();
-    body.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 30, 14);
-    body.fillStyle(0x3f6fb5).fillRoundedRect(-9, -34, 18, 30, 7);
-    body.fillStyle(0x2c4f85).fillRoundedRect(-9, -18, 18, 14, { tl: 0, tr: 0, bl: 7, br: 7 });
-    body.fillStyle(0xf0d2b0).fillCircle(0, -42, 8);
-    this.weapon = this.add.graphics();
-    return this.add.container(0, 0, [body, this.weapon]);
+    drawPerson(body, { clothes: 0x3f6fb5, hair: 0x6b4a2a });
+    this.weapon = this.add.graphics({ x: 0, y: -20 });
+    this.heroFigure = this.add.container(0, 0, [body, this.weapon]);
+    return this.add.container(0, 0, [shadow, this.heroFigure]);
   }
 
-  /** A blade that points where the hero is facing, so the attack direction is readable. */
-  private drawWeapon(): void {
-    const { facing, attackCooldown, chargesOn } = this.world.player;
+  /** Starts the quick turn of the blade that accompanies a blow. */
+  private swingBlade(): void {
+    this.swing = 1.6;
+    this.tweens.add({
+      targets: this,
+      swing: -0.9,
+      duration: 110,
+      ease: 'Quad.easeOut',
+      onComplete: () => this.tweens.add({ targets: this, swing: 0, duration: 140 }),
+    });
+  }
+
+  /** The blade points where the hero faces; a walking hero bobs a little. */
+  private animateHero(): void {
+    const { facing, chargesOn } = this.world.player;
+    if (chargesOn !== this.weaponCharged) {
+      this.weaponCharged = chargesOn;
+      drawBlade(this.weapon, chargesOn);
+    }
     const tip = tileToScreen(facing.x, facing.y);
-    const length = Math.hypot(tip.x, tip.y) || 1;
-    const reach = attackCooldown > 0 ? 30 : 22;
-    this.weapon.clear();
-    this.weapon.lineStyle(4, chargesOn ? CHARGE_COLOR : 0xd9dde6, 1);
-    this.weapon.lineBetween(0, -20, (tip.x / length) * reach, -20 + (tip.y / length) * reach);
+    this.weapon.setRotation(Math.atan2(tip.y, tip.x) + this.swing);
+    const walking = isMoving(this.world) && isAlive(this.world);
+    this.heroFigure.y = walking ? -Math.abs(Math.sin(performance.now() / 95)) * 2.2 : 0;
+  }
+
+  /**
+   * The target is the monster under the cursor, or else the one the hero hit
+   * last. It gets a red ring on the ground and its name and health are
+   * reported for the target frame.
+   */
+  private updateTarget(): void {
+    const { monsters } = this.world;
+    let target: Monster | null = null;
+    const pointer = this.input.activePointer;
+    if (!pointer.wasTouch && this.isOverGame(pointer)) {
+      const cursor = this.pointerInWorld(pointer).world;
+      let best = 0.9;
+      for (const monster of monsters) {
+        const distance = Math.hypot(monster.pos.x - cursor.x, monster.pos.y - cursor.y);
+        if (distance < best) {
+          best = distance;
+          target = monster;
+        }
+      }
+    }
+    if (!target && this.targetId !== null && performance.now() < this.targetUntil) {
+      target = monsters.find((monster) => monster.id === this.targetId) ?? null;
+    }
+    const sprite = target ? this.monsterSprites.get(target.id) : undefined;
+    this.targetRing.setVisible(sprite !== undefined);
+    if (sprite) this.targetRing.setPosition(sprite.container.x, sprite.container.y);
+
+    const shown = target ? `${target.id}/${target.hp}` : '';
+    if (shown === this.shownTarget) return;
+    this.shownTarget = shown;
+    this.events_.onTarget(target);
+  }
+
+  /** True when the cursor is over the game itself and not over a window or button of the interface. */
+  private isOverGame(pointer: Phaser.Input.Pointer): boolean {
+    const event = pointer.event as MouseEvent | undefined;
+    return event?.target === this.game.canvas;
+  }
+
+  /** A few bright specks flying out from a blow. */
+  private showSparks(x: number, y: number, color: number): void {
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI * 2 * i) / 6 + Math.random() * 0.8; // Cosmetic only; not a game rule.
+      const speck = this.add.rectangle(x, y, 3, 3, color).setDepth(EFFECT_DEPTH);
+      this.tweens.add({
+        targets: speck,
+        x: x + Math.cos(angle) * 22,
+        y: y + Math.sin(angle) * 14 - 6,
+        alpha: 0,
+        duration: 260,
+        ease: 'Quad.easeOut',
+        onComplete: () => speck.destroy(),
+      });
+    }
   }
 
   private createMonsterSprite(monster: Monster): MonsterSprite {
     const body = this.add.graphics();
     const bar = this.add.graphics();
-    const container = this.add.container(0, 0, [body, bar]);
-    return { container, body, bar, previous: { ...monster.pos }, lastHp: -1 };
+    const figure = this.add.container(0, 0, [body]);
+    const container = this.add.container(0, 0, [figure, bar]);
+    return { container, figure, body, bar, previous: { ...monster.pos }, lastHp: -1 };
   }
 
   private drawMonsterBody(sprite: MonsterSprite, kind: Monster['kind'], windingUp: boolean): void {
     const g = sprite.body;
     g.clear();
-    g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 30, 14);
     // The warning before a blow: the monster turns bright and a ring appears under it.
-    if (windingUp) g.lineStyle(3, 0xffb347, 1).strokeEllipse(0, 0, 44, 22);
-    if (kind === 'boar') {
-      // Broad and dark, with pale tusks.
-      g.fillStyle(windingUp ? 0xd8663a : 0x5b4636).fillEllipse(0, -13, 38, 22);
-      g.fillStyle(windingUp ? 0xd8663a : 0x6e5744).fillEllipse(13, -13, 16, 14);
-      g.fillStyle(0xf4e9c8).fillTriangle(15, -9, 21, -15, 18, -8).fillCircle(13, -17, 1.8);
-      return;
-    }
-    if (kind === 'wolf') {
-      // Low and long, with pointed ears.
-      g.fillStyle(windingUp ? 0xd8663a : 0x8a8f99).fillEllipse(0, -11, 34, 16);
-      g.fillStyle(windingUp ? 0xd8663a : 0x9aa0ab).fillCircle(11, -17, 8);
-      g.fillTriangle(6, -22, 9, -30, 12, -22).fillTriangle(12, -22, 15, -30, 18, -22);
-      g.fillStyle(0xf4e9c8).fillCircle(9, -18, 1.8).fillCircle(14, -18, 1.8);
-      return;
-    }
-    g.fillStyle(windingUp ? 0xd8663a : 0x7d3b3b).fillRoundedRect(-12, -26, 24, 24, 9);
-    g.fillStyle(0xf4e9c8).fillCircle(-5, -17, 3).fillCircle(5, -17, 3);
-    g.fillStyle(0x12141a).fillCircle(-5, -17, 1.2).fillCircle(5, -17, 1.2);
+    if (windingUp) g.lineStyle(2.5, 0xffb347, 1).strokeEllipse(0, 0, 44, 22);
+    drawMonsterFigure(g, kind, windingUp);
   }
 
   private syncMonsters(alpha: number): void {
@@ -616,6 +699,11 @@ export class DungeonScene extends Phaser.Scene {
       const x = sprite.previous.x + (monster.pos.x - sprite.previous.x) * alpha;
       const y = sprite.previous.y + (monster.pos.y - sprite.previous.y) * alpha;
       const at = tileToScreen(x, y);
+      // Monsters are drawn facing right; mirror them when they move or look the other way on the screen.
+      const heading = monster.aggro ? tileToScreen(this.world.player.pos.x - x, this.world.player.pos.y - y).x : at.x - sprite.container.x;
+      if (Math.abs(heading) > 0.3) sprite.figure.setScale(heading < 0 ? -1 : 1, 1);
+      const stepping = Math.hypot(monster.pos.x - sprite.previous.x, monster.pos.y - sprite.previous.y) > 0.001;
+      sprite.figure.y = stepping ? -Math.abs(Math.sin(performance.now() / 90 + monster.id)) * 2 : 0;
       sprite.container.setPosition(at.x, at.y).setDepth(x + y);
 
       const windingUp = monster.windup > 0;
@@ -625,8 +713,8 @@ export class DungeonScene extends Phaser.Scene {
         this.drawMonsterBody(sprite, monster.kind, windingUp);
         sprite.bar.clear();
         if (monster.hp < monster.maxHp) {
-          sprite.bar.fillStyle(0x12141a, 0.9).fillRect(-16, -38, 32, 6);
-          sprite.bar.fillStyle(0xd9534f).fillRect(-15, -37, 30 * (monster.hp / monster.maxHp), 4);
+          sprite.bar.fillStyle(0x000000, 0.9).fillRect(-15, -48, 30, 5);
+          sprite.bar.fillStyle(0xd0463f).fillRect(-14, -47, 28 * (monster.hp / monster.maxHp), 3);
         }
       }
     }
@@ -648,25 +736,10 @@ export class DungeonScene extends Phaser.Scene {
     return g;
   }
 
-  /** A villager: clothes in the colour of their trade and a sign above the head. Guards carry a spear instead. */
   private drawNpc(npc: Npc): Phaser.GameObjects.Graphics {
-    const look = NPC_LOOK[npc.kind];
     const at = tileToScreen(npc.pos.x, npc.pos.y);
     const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(npc.pos.x + npc.pos.y);
-    g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 32, 15);
-    g.fillStyle(look.clothes).fillRoundedRect(-11, -36, 22, 34, { tl: 9, tr: 9, bl: 4, br: 4 });
-    g.fillStyle(look.shade).fillRect(-11, -14, 22, 12);
-    g.fillStyle(0xf0d2b0).fillCircle(0, -44, 8);
-    if (npc.kind === 'guard') {
-      g.fillStyle(look.shade).fillEllipse(0, -50, 20, 9); // helmet
-      g.lineStyle(3, 0x5a3f26, 1).lineBetween(15, -4, 15, -70);
-      g.fillStyle(look.sign).fillTriangle(11, -68, 19, -68, 15, -82);
-      return g;
-    }
-    g.fillStyle(0x6b4a2a).fillEllipse(0, -51, 22, 8);
-    // The sign marks someone worth talking to.
-    g.fillStyle(0x12141a).fillCircle(0, -66, 8);
-    g.fillStyle(look.sign).fillCircle(0, -66, 6.5);
+    drawNpcFigure(g, npc.kind);
     return g;
   }
 
@@ -676,7 +749,7 @@ export class DungeonScene extends Phaser.Scene {
     if (!guard) return;
     const from = tileToScreen(guard.pos.x, guard.pos.y);
     const line = this.add.graphics().setDepth(EFFECT_DEPTH);
-    line.lineStyle(4, 0xffffff, 0.8).lineBetween(from.x + 15, from.y - 60, target.x, target.y - 14);
+    line.lineStyle(3, 0xffffff, 0.8).lineBetween(from.x + 12, from.y - 62, target.x, target.y - 14);
     this.tweens.add({ targets: line, alpha: 0, duration: 160, onComplete: () => line.destroy() });
   }
 
@@ -754,16 +827,7 @@ export class DungeonScene extends Phaser.Scene {
             // Trees stand on grass, so the ground is drawn under them too.
             if (isWall && look.walls !== 'trees') continue;
             const c = tileToScreen(x, y);
-            const px = c.x - minX;
-            const py = c.y - minY;
-            // Cosmetic variation only; it does not come from the game's RNG.
-            const shade = ((x * 7 + y * 13) % 5) * 2;
-            const base = !isWall && isRoad(zone, x, y) ? ROAD_COLOR : look.floor;
-            const diamond = [{ x: px, y: py - HALF_H }, { x: px + HALF_W, y: py }, { x: px, y: py + HALF_H }, { x: px - HALF_W, y: py }];
-            brush.fillStyle(Phaser.Display.Color.GetColor(base[0] + shade, base[1] + shade, base[2] + shade));
-            brush.fillPoints(diamond, true);
-            brush.lineStyle(1, look.grid, 0.5);
-            brush.strokePoints(diamond, true, true);
+            this.paintGround(brush, c.x - minX, c.y - minY, x, y, !isWall && isRoad(zone, x, y) ? ROAD_COLOR : look.floor, look.walls);
           }
         }
         const key = `floor-${cx}-${cy}`;
@@ -782,10 +846,12 @@ export class DungeonScene extends Phaser.Scene {
         if (walls === 'trees') key = `tree${(x * 31 + y * 17) % 3}`;
         else if (walls === 'stone') key = 'stone';
         // The outer ring of the village is the palisade; walls inside it are houses.
-        else key = this.touchesAnotherRegion(x, y) ? 'palisade' : 'house';
+        else if (this.touchesAnotherRegion(x, y)) key = 'palisade';
+        // A few houses show a lit window on the side that faces the square.
+        else key = (x * 13 + y * 7) % 3 === 0 ? 'houseLit' : 'house';
         const c = tileToScreen(x, y);
         const origin = this.obstacleOrigins.get(key) as number;
-        objects.push(this.add.image(c.x, c.y, key).setOrigin(0.5, origin).setDepth(x + y));
+        objects.push(this.add.image(c.x, c.y, key).setOrigin(0.5, origin).setScale(1 / TEXTURE_SCALE).setDepth(x + y));
       }
     }
     return objects;
@@ -802,26 +868,103 @@ export class DungeonScene extends Phaser.Scene {
     return false;
   }
 
+  /**
+   * Paints one tile of ground: a base colour that varies a little from tile
+   * to tile, and a few specks (grass blades, pebbles, cracks) so that the
+   * ground does not look like a board. All variation is cosmetic and comes
+   * from the tile's coordinates, not from the game's random generator.
+   */
+  private paintGround(g: Phaser.GameObjects.Graphics, px: number, py: number, x: number, y: number, base: readonly [number, number, number], walls: 'stone' | 'trees' | 'wood'): void {
+    const hash = (n: number): number => {
+      const v = Math.sin(x * 127.1 + y * 311.7 + n * 74.7) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const shade = Math.round((hash(0) - 0.5) * 12);
+    const color = Phaser.Display.Color.GetColor(base[0] + shade, base[1] + shade, base[2] + shade);
+    // Slightly larger than the tile so that neighbours overlap and no seams show.
+    g.fillStyle(color);
+    g.fillPoints([{ x: px, y: py - HALF_H - 0.6 }, { x: px + HALF_W + 1, y: py }, { x: px, y: py + HALF_H + 0.6 }, { x: px - HALF_W - 1, y: py }], true);
+    const light = Phaser.Display.Color.GetColor(Math.min(255, base[0] + 26), Math.min(255, base[1] + 26), Math.min(255, base[2] + 22));
+    const dark = Phaser.Display.Color.GetColor(Math.max(0, base[0] - 22), Math.max(0, base[1] - 22), Math.max(0, base[2] - 20));
+    for (let i = 1; i <= 5; i++) {
+      // A point inside the diamond: start from a point in the square and fold it in.
+      const u = hash(i) - 0.5;
+      const v = hash(i + 10) - 0.5;
+      const sx = px + (u - v) * HALF_W * 0.9;
+      const sy = py + (u + v) * HALF_H * 0.9;
+      const bright = hash(i + 20) > 0.5;
+      g.fillStyle(bright ? light : dark, 0.55);
+      if (walls === 'trees') g.fillRect(sx, sy - 2, 1.2, 3); // a blade of grass
+      else if (walls === 'wood') g.fillEllipse(sx, sy, 3.5, 1.8); // a pebble on packed earth
+      else g.fillRect(sx - 2.5, sy, 5, 1); // a crack in stone
+    }
+    if (walls === 'stone') {
+      // Flagstones: a faint joint along two edges.
+      g.lineStyle(1, dark, 0.5).lineBetween(px - HALF_W, py, px, py + HALF_H).lineBetween(px, py + HALF_H, px + HALF_W, py);
+    }
+  }
+
   /** Paints each kind of obstacle once into a small picture that is then reused for every tile. */
   private ensureObstacleTextures(): void {
     if (this.obstacleOrigins.size > 0) return;
-    const block = (key: string, height: number, left: number, right: number, top: number) => {
+    const bake = (key: string, width: number, height: number, originY: number, paint: (g: Phaser.GameObjects.Graphics) => void) => {
       const brush = this.make.graphics({}, false);
-      this.drawBlock(brush, { x: HALF_W, y: height + HALF_H }, height, left, right, top);
-      brush.generateTexture(key, TILE_WIDTH, height + TILE_HEIGHT);
+      brush.scaleCanvas(TEXTURE_SCALE, TEXTURE_SCALE);
+      paint(brush);
+      brush.generateTexture(key, width * TEXTURE_SCALE, height * TEXTURE_SCALE);
       brush.destroy();
       // Where the centre of the tile is inside the picture, as a share of its height.
-      this.obstacleOrigins.set(key, (height + HALF_H) / (height + TILE_HEIGHT));
+      this.obstacleOrigins.set(key, originY / height);
     };
-    block('stone', WALL_HEIGHT, 0x4a4038, 0x362e28, 0x6b5d50);
-    block('palisade', 34, 0x6b4a2a, 0x4f361e, 0x86603a);
-    block('house', 44, 0x8c7a5e, 0x6f6049, 0xa34a3a); // a red roof
+    const block = (key: string, height: number, paint: (g: Phaser.GameObjects.Graphics, c: Point, top: number) => void) =>
+      bake(key, TILE_WIDTH, height + TILE_HEIGHT + 12, height + HALF_H + 12, (g) => paint(g, { x: HALF_W, y: height + HALF_H + 12 }, HALF_H + 12));
+
+    block('stone', WALL_HEIGHT, (g, c) => {
+      this.drawBlock(g, c, WALL_HEIGHT, 0x4f463d, 0x39312b, 0x6f6257);
+      g.lineStyle(1, 0x2a2420, 0.7).lineBetween(c.x - HALF_W, c.y - 14, c.x, c.y - 14 + HALF_H).lineBetween(c.x, c.y - 10 + HALF_H, c.x + HALF_W, c.y - 10);
+      g.lineStyle(1, 0x8a7c6e, 0.6).strokePoints([{ x: c.x - HALF_W, y: c.y - WALL_HEIGHT }, { x: c.x, y: c.y - WALL_HEIGHT + HALF_H }, { x: c.x + HALF_W, y: c.y - WALL_HEIGHT }], false);
+    });
+    block('palisade', 36, (g, c) => {
+      this.drawBlock(g, c, 36, 0x6f4d2c, 0x523820, 0x86603a);
+      // Stakes: vertical joints on both faces and a row of points on top.
+      g.lineStyle(1, 0x2f2012, 0.8);
+      for (let i = 1; i < 4; i++) {
+        const dx = (HALF_W * i) / 4;
+        g.lineBetween(c.x - HALF_W + dx, c.y - 36 + dx / 2, c.x - HALF_W + dx, c.y + dx / 2);
+        g.lineBetween(c.x + dx, c.y - 36 + HALF_H - dx / 2, c.x + dx, c.y + HALF_H - dx / 2);
+      }
+      g.fillStyle(0x86603a);
+      for (let i = 0; i < 4; i++) {
+        const lx = c.x - HALF_W + (HALF_W * (i + 0.5)) / 4;
+        const ly = c.y - 36 + ((i + 0.5) * HALF_H) / 4;
+        g.fillTriangle(lx - 4, ly, lx + 4, ly + 2, lx, ly - 9);
+        const rx = c.x + (HALF_W * (i + 0.5)) / 4;
+        const ry = c.y - 36 + HALF_H - ((i + 0.5) * HALF_H) / 4;
+        g.fillTriangle(rx - 4, ry + 2, rx + 4, ry, rx, ry - 9);
+      }
+    });
+    for (const [key, lit] of [['house', false], ['houseLit', true]] as const) {
+      block(key, 44, (g, c) => {
+        // Plastered walls with dark timbers under a tiled roof.
+        this.drawBlock(g, c, 44, 0xb9a887, 0x94836a, 0x9c4636);
+        g.lineStyle(2, 0x4a3524, 0.9);
+        g.lineBetween(c.x - HALF_W, c.y - 44, c.x - HALF_W, c.y).lineBetween(c.x, c.y - 44 + HALF_H, c.x, c.y + HALF_H).lineBetween(c.x + HALF_W, c.y - 44, c.x + HALF_W, c.y);
+        g.lineBetween(c.x - HALF_W, c.y - 22, c.x, c.y - 22 + HALF_H).lineBetween(c.x, c.y - 22 + HALF_H, c.x + HALF_W, c.y - 22);
+        // Rows of tiles on the roof.
+        g.lineStyle(1, 0x6e2d22, 0.8);
+        for (let i = 1; i < 4; i++) {
+          const k = i / 4;
+          g.lineBetween(c.x - HALF_W + HALF_W * k, c.y - 44 - HALF_H * k, c.x + HALF_W * k, c.y - 44 + HALF_H - HALF_H * k);
+        }
+        if (lit) {
+          // A window with a warm light on the left wall.
+          g.fillStyle(0x2a1d12).fillPoints([{ x: c.x - 24, y: c.y - 20 }, { x: c.x - 10, y: c.y - 13 }, { x: c.x - 10, y: c.y - 1 }, { x: c.x - 24, y: c.y - 8 }], true);
+          g.fillStyle(0xf2c66a).fillPoints([{ x: c.x - 22, y: c.y - 17 }, { x: c.x - 12, y: c.y - 12 }, { x: c.x - 12, y: c.y - 3 }, { x: c.x - 22, y: c.y - 8 }], true);
+        }
+      });
+    }
     for (let variant = 0; variant < 3; variant++) {
-      const brush = this.make.graphics({}, false);
-      this.drawTree(brush, { x: 32, y: 68 }, variant);
-      brush.generateTexture(`tree${variant}`, 64, 80);
-      brush.destroy();
-      this.obstacleOrigins.set(`tree${variant}`, 68 / 80);
+      bake(`tree${variant}`, 76, 96, 84, (g) => this.drawTree(g, { x: 38, y: 84 }, variant));
     }
   }
 
@@ -836,12 +979,21 @@ export class DungeonScene extends Phaser.Scene {
     g.fillPoints([{ x: c.x, y: t - HALF_H }, { x: c.x + HALF_W, y: t }, { x: c.x, y: t + HALF_H }, { x: c.x - HALF_W, y: t }], true);
   }
 
-  /** `variant` (0-2) changes the size and tint a little so a forest does not look stamped. */
+  /** A tree with a layered crown. `variant` (0-2) changes its size and tint so a forest does not look stamped. */
   private drawTree(g: Phaser.GameObjects.Graphics, c: Point, variant: number): void {
-    const size = 20 + variant * 3;
-    g.fillStyle(0x000000, 0.3).fillEllipse(c.x, c.y, 40, 18);
-    g.fillStyle(0x5a3f26).fillRect(c.x - 4, c.y - 22, 8, 22);
-    g.fillStyle([0x2f6b3a, 0x357a41, 0x2a5f34][variant] as number).fillCircle(c.x, c.y - 34, size);
-    g.fillStyle([0x3d8249, 0x46924f, 0x377843][variant] as number).fillCircle(c.x - 5, c.y - 40, size * 0.6);
+    const size = 17 + variant * 3;
+    const greens = [[0x24512e, 0x2f6b3a, 0x448a4c, 0x63a862], [0x29582f, 0x357a41, 0x4c9a54, 0x70b56b], [0x1f4a2b, 0x2a5f34, 0x3d7f47, 0x599c5c]][variant] as number[];
+    g.fillStyle(0x000000, 0.28).fillEllipse(c.x + 4, c.y + 1, 46, 19);
+    // trunk
+    g.fillStyle(0x4a3220).fillRect(c.x - 4, c.y - 26, 8, 26);
+    g.fillStyle(0x6b4a2c).fillRect(c.x - 4, c.y - 26, 3, 26);
+    g.lineStyle(1.5, 0x14110d, 0.9).strokeRect(c.x - 4, c.y - 26, 8, 26);
+    // crown: a dark underside, then lighter clumps towards the top left, where the light comes from
+    const top = c.y - 30 - size;
+    g.fillStyle(0x14110d, 0.9).fillCircle(c.x, top + 4, size + 2.5).fillCircle(c.x - size * 0.7, top + 12, size * 0.75 + 2).fillCircle(c.x + size * 0.7, top + 12, size * 0.75 + 2);
+    g.fillStyle(greens[0] as number).fillCircle(c.x, top + 4, size + 1).fillCircle(c.x - size * 0.7, top + 12, size * 0.75).fillCircle(c.x + size * 0.7, top + 12, size * 0.75);
+    g.fillStyle(greens[1] as number).fillCircle(c.x - 2, top + 1, size * 0.9).fillCircle(c.x - size * 0.7, top + 9, size * 0.6);
+    g.fillStyle(greens[2] as number).fillCircle(c.x - 5, top - 3, size * 0.62).fillCircle(c.x + size * 0.45, top + 5, size * 0.4);
+    g.fillStyle(greens[3] as number, 0.9).fillCircle(c.x - 8, top - 6, size * 0.3);
   }
 }

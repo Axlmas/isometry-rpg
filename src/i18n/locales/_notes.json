@@ -14,7 +14,6 @@
   "item.leather": "All item.* names: dictionary form, capitalised as a title in English, sentence case in Russian.",
   "hud.xp": "Follows the level after a dot on the same line ('Level 3 · experience 40 of 260'), so it starts with a lower-case letter.",
   "hud.xpMax": "Shown in place of hud.xp at the last level; same position, lower-case start.",
-  "skills.cooldown": "Shown on a small skill button. {seconds} is whole seconds; 's' is the abbreviation for seconds.",
   "skills.locked": "Shown on a skill button the hero cannot use yet. Keep it very short.",
   "skillInfo.heavyBlow": "All skillInfo.* texts are tooltips: one sentence saying what the skill does, no numbers.",
   "quick.on": "State of the weapon-charges switch on a small button, followed by how many charges are left. Abbreviate if needed.",
@@ -38,5 +37,10 @@
   "item.enchanted": "An item name followed by its tempering level, for example 'Iron Sword +3'.",
   "trainer.skill": "A skill name followed by the key that uses it, for example 'Heavy Blow (Q)'.",
   "log.enchantFailed": "{item} is an item name in dictionary form; {crystals} is how many crystals were left, possibly none.",
-  "log.guard": "A village guard speaking; the line starts with who is talking."
+  "log.guard": "A village guard speaking; the line starts with who is talking.",
+  "hud.bar": "Numbers shown inside the health, mana and experience bars, for example '84 / 130'. Must stay very short.",
+  "hud.levelShort": "The level number alone, shown in a small badge.",
+  "hud.hero": "Stands in for the hero's name until heroes can be named.",
+  "monster.wolf": "Names of monsters, shown in the target frame. Invented for this game's world; translate the meaning.",
+  "quick.stateOn": "Whether weapon charges are switched on; last line of the hint for the F slot."
 }

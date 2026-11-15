@@ -8,41 +8,56 @@
 <body>
   <div id="game"></div>
 
-  <div id="hud">
-    <header class="panel">
-      <h1 data-i18n="game.title"></h1>
-      <div id="health" role="meter" aria-valuemin="0"><div id="health-fill"></div></div>
-      <p id="health-text"></p>
-      <div id="mana" class="bar" role="meter" aria-valuemin="0"><div id="mana-fill"></div></div>
-      <p id="mana-text"></p>
-      <div id="xp" class="bar" aria-hidden="true"><div id="xp-fill"></div></div>
-      <p><span id="level"></span> · <span id="xp-text"></span></p>
-      <p id="hero-stats"></p>
-      <p id="coins"></p>
-      <p id="zone"></p>
-      <p id="monsters"></p>
-      <div class="actions">
-        <button id="inventory-open" type="button" class="small" aria-expanded="false" aria-controls="inventory" data-i18n="inventory.open"></button>
-        <button id="language" type="button" class="small"></button>
-      </div>
-      <details id="controls">
-        <summary data-i18n="hud.controls"></summary>
-        <p id="hint" data-i18n="hud.hint"></p>
-      </details>
-      <p id="save-status"></p>
-    </header>
+  <div id="vignette" aria-hidden="true"></div>
+
+  <section id="status" class="frame" aria-labelledby="hero-name">
+    <div class="frame-head"><span id="level" class="badge"></span><span id="hero-name" data-i18n="hud.hero"></span></div>
+    <div id="health" class="bar hp" role="meter" aria-valuemin="0"><div id="health-fill" class="fill"></div><span id="health-text"></span></div>
+    <div id="mana" class="bar mp" role="meter" aria-valuemin="0"><div id="mana-fill" class="fill"></div><span id="mana-text"></span></div>
+    <div id="xp" class="bar xp" role="meter" aria-valuemin="0"><div id="xp-fill" class="fill"></div><span id="xp-text"></span></div>
+  </section>
+
+  <section id="target" class="frame" aria-live="off" hidden>
+    <div class="frame-head"><span id="target-level" class="badge"></span><span id="target-name"></span></div>
+    <div class="bar hp"><div id="target-fill" class="fill"></div><span id="target-text"></span></div>
+  </section>
+
+  <section id="map-frame" class="frame">
+    <canvas id="minimap" width="168" height="168" aria-hidden="true"></canvas>
+    <p id="zone"></p>
+    <p id="monsters"></p>
+  </section>
+
+  <section id="chat" class="frame">
     <ul id="log" aria-live="polite"></ul>
-  </div>
+    <p id="save-status"></p>
+  </section>
+
+  <nav id="menu">
+    <button id="inventory-open" type="button" aria-expanded="false" aria-controls="inventory" data-i18n="inventory.open"></button>
+    <button id="help-open" type="button" aria-expanded="false" aria-controls="help" data-i18n="help.open"></button>
+    <button id="language" type="button"></button>
+  </nav>
+
+  <aside id="help" class="panel talk" aria-labelledby="help-title" hidden>
+    <div class="panel-head">
+      <h2 id="help-title" data-i18n="help.title"></h2>
+      <button id="help-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="hint" data-i18n="hud.hint"></p>
+  </aside>
 
   <aside id="inventory" class="panel" aria-labelledby="inventory-title" hidden>
     <div class="panel-head">
       <h2 id="inventory-title" data-i18n="inventory.title"></h2>
       <button id="inventory-close" type="button" class="small" data-i18n="inventory.close"></button>
     </div>
+    <p id="hero-stats"></p>
     <h3 data-i18n="inventory.equipped"></h3>
     <div id="equipment-grid" class="cells"></div>
     <h3 id="inventory-count"></h3>
     <div id="bag-grid" class="cells"></div>
+    <p id="coins" class="coins"></p>
     <div id="item-detail"></div>
   </aside>
 

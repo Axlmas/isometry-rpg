@@ -1,5 +1,5 @@
 import type { MessageKey } from '../i18n';
-import type { NpcKind } from '../sim';
+import type { MonsterKind, NpcKind } from '../sim';
 
 /** NPC kinds to translation keys, written out in full so the translation check can find them. */
 export const NPC_NAME: Record<NpcKind, MessageKey> = {
@@ -17,4 +17,11 @@ export const NPC_LOOK: Record<NpcKind, { clothes: number; shade: number; sign: n
   blacksmith: { clothes: 0x4a4d57, shade: 0x34363d, sign: 0xff9a3d },
   trainer: { clothes: 0x6a4a9c, shade: 0x4c3472, sign: 0x9fd0ff },
   guard: { clothes: 0x9aa0ab, shade: 0x6e747f, sign: 0xcfd3dc },
+};
+
+/** Monster kinds to the names shown in the target frame. */
+export const MONSTER_NAME: Record<MonsterKind, MessageKey> = {
+  wolf: 'monster.wolf',
+  boar: 'monster.boar',
+  grunt: 'monster.grunt',
 };

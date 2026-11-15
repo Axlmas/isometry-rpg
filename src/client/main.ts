@@ -4,16 +4,17 @@ import {
   type GameEvent, type Region, type World, type ZoneKind, MAX_LEVEL, SKILLS,
   SHOP_STOCK, characterOf, createWorld, isAlive, minesLevelFor, nearestExit, nearestNpc, regionAt, travelerOf, xpToNextLevel,
 } from '../sim';
-import { DungeonScene } from './DungeonScene';
+import { DungeonScene, RENDER_SCALE } from './DungeonScene';
 import { ForgePanel } from './forgePanel';
 import { Hud } from './hud';
 import { InventoryPanel } from './inventoryPanel';
 import { itemName } from './itemView';
 import { NPC_NAME } from './npcText';
-import { QuickBar } from './quickBar';
 import { loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
 import { ShopPanel } from './shopPanel';
-import { SkillBar } from './skillBar';
+import { Hotbar } from './hotbar';
+import { Minimap } from './minimap';
+import { MONSTER_NAME } from './npcText';
 import { TrainerPanel } from './trainerPanel';
 import { SKILL_NAME } from './skillText';
 import { REGION_NAME } from './zoneText';
@@ -83,12 +84,13 @@ function showRegion(w: World, announce: boolean): void {
 /** Things that count down or depend on where the hero stands; cheap enough for every tick. */
 function onTick(w: World): void {
   if (regionAt(w.zone, w.player.pos) !== region) showRegion(w, true);
-  skillBar.update(w);
-  quickBar.update(w);
+  hotbar.update(w);
   shop.update(w);
   trainer.update(w);
   forge.update(w);
   hud.setPrompt(promptText(w));
+  // The map does not need to follow every tick.
+  if (w.tick % 4 === 0) minimap.draw(w);
 }
 
 /** Moves the hero to the other map: into the mines or back out. They arrive as they left. */
@@ -110,6 +112,8 @@ function enterWorld(): void {
   region = null;
   showStats(world);
   showRegion(world, true);
+  minimap.draw(world);
+  document.getElementById('vignette')?.classList.toggle('dark', world.zone === 'dungeon');
   persist();
 }
 
@@ -223,13 +227,15 @@ const scene = new DungeonScene(world, {
   onInventoryFull: () => hud.log(i18n.t('log.full'), true),
   onToggleInventory: () => inventory.toggle(),
   onInteract: interact,
+  onTarget: (monster) =>
+    hud.setTarget(monster ? { name: i18n.t(MONSTER_NAME[monster.kind]), level: monster.level, hp: monster.hp, maxHp: monster.maxHp } : null),
   onNotice: showNotice,
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
 });
 
-const skillBar = new SkillBar(i18n, (id) => scene.useSkill(id, false));
-const quickBar = new QuickBar(i18n, (command) => scene.send(command));
+const hotbar = new Hotbar(i18n, (id) => scene.useSkill(id, false), (command) => scene.send(command));
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement);
 // The hero does not swing a weapon while talking to someone.
 const shop = new ShopPanel(i18n, (command) => scene.send(command), () => syncPeace());
 const trainer = new TrainerPanel(i18n, (command) => scene.send(command), () => syncPeace());
@@ -259,6 +265,8 @@ const hud = new Hud({
 });
 
 showStats(world);
+minimap.draw(world);
+document.getElementById('vignette')?.classList.toggle('dark', world.zone === 'dungeon');
 // Say where the hero is when the game opens.
 region = null;
 showRegion(world, true);
@@ -276,13 +284,17 @@ function onFatalError(error: unknown): void {
 window.addEventListener('error', (event) => onFatalError(event.error ?? event.message));
 window.addEventListener('unhandledrejection', (event) => onFatalError(event.reason));
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#12141a',
-  scale: { mode: Phaser.Scale.RESIZE, width: '100%', height: '100%' },
+  // The canvas has RENDER_SCALE times more pixels than the window and is shown scaled down,
+  // so the picture is sharp on screens with a high pixel density.
+  scale: { mode: Phaser.Scale.NONE, width: window.innerWidth * RENDER_SCALE, height: window.innerHeight * RENDER_SCALE, zoom: 1 / RENDER_SCALE },
   // Keeps the browser's own context menu and page scroll out of the way.
   disableContextMenu: true,
   banner: false,
   scene,
 });
+
+window.addEventListener('resize', () => game.scale.resize(window.innerWidth * RENDER_SCALE, window.innerHeight * RENDER_SCALE));

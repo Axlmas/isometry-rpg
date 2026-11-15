@@ -9,7 +9,7 @@ function element<T extends HTMLElement>(id: string): T {
 export interface HudOptions {
   i18n: I18n;
   canSave: boolean;
-  /** Open the controls summary; meant for a player's first launch. */
+  /** Open the help window; meant for a player's first launch. */
   showControls: boolean;
   onLanguageToggle(): void;
   onRespawn(): void;
@@ -23,6 +23,7 @@ export class Hud {
   private mana = { current: 0, max: 1 };
   private progress = { level: 1, xp: 0, needed: 1 };
   private xpLost = 0;
+  private shownTarget = '';
   private toastTimer: number | undefined;
   private bannerTimer: number | undefined;
 
@@ -30,7 +31,14 @@ export class Hud {
     this.i18n = options.i18n;
     this.canSave = options.canSave;
 
-    element<HTMLDetailsElement>('controls').open = options.showControls;
+    const help = element('help');
+    const setHelp = (open: boolean) => {
+      help.hidden = !open;
+      element('help-open').setAttribute('aria-expanded', String(open));
+    };
+    element('help-open').addEventListener('click', () => setHelp(help.hasAttribute('hidden')));
+    element('help-close').addEventListener('click', () => setHelp(false));
+    setHelp(options.showControls);
     element('language').addEventListener('click', options.onLanguageToggle);
     element('error-reload').addEventListener('click', () => window.location.reload());
     element('death-respawn').addEventListener('click', options.onRespawn);
@@ -38,34 +46,51 @@ export class Hud {
     this.render();
   }
 
-  setHealth(current: number, max: number): void {
-    this.health = { current, max };
-    const meter = element('health');
+  /** Fills one of the bars: the short numbers inside it, the full sentence for screen readers. */
+  private setBar(id: 'health' | 'mana' | 'xp', current: number, max: number, spoken: string, shown: string): void {
+    const meter = element(id);
     meter.setAttribute('aria-valuenow', String(current));
     meter.setAttribute('aria-valuemax', String(max));
-    meter.setAttribute('aria-valuetext', this.i18n.t('hud.health', { current, max }));
-    element('health-fill').style.inlineSize = `${Math.max(0, Math.min(100, (current / max) * 100))}%`;
-    element('health-text').textContent = this.i18n.t('hud.health', { current, max });
+    meter.setAttribute('aria-valuetext', spoken);
+    element(`${id}-fill`).style.inlineSize = `${max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 100}%`;
+    element(`${id}-text`).textContent = shown;
+  }
+
+  setHealth(current: number, max: number): void {
+    this.health = { current, max };
+    this.setBar('health', current, max, this.i18n.t('hud.health', { current, max }), this.i18n.t('hud.bar', { current, max }));
   }
 
   setMana(current: number, max: number): void {
     this.mana = { current, max };
-    const meter = element('mana');
-    const text = this.i18n.t('hud.mana', { current, max });
-    meter.setAttribute('aria-valuenow', String(current));
-    meter.setAttribute('aria-valuemax', String(max));
-    meter.setAttribute('aria-valuetext', text);
-    element('mana-fill').style.inlineSize = `${Math.max(0, Math.min(100, (current / max) * 100))}%`;
-    element('mana-text').textContent = text;
+    this.setBar('mana', current, max, this.i18n.t('hud.mana', { current, max }), this.i18n.t('hud.bar', { current, max }));
   }
 
   /** `needed` is zero at the maximum level. */
   setProgress(level: number, xp: number, needed: number): void {
     this.progress = { level, xp, needed };
     const { i18n } = this;
-    element('level').textContent = i18n.t('hud.level', { level });
-    element('xp-text').textContent = needed > 0 ? i18n.t('hud.xp', { current: xp, needed }) : i18n.t('hud.xpMax');
-    element('xp-fill').style.inlineSize = `${needed > 0 ? Math.min(100, (xp / needed) * 100) : 100}%`;
+    const badge = element('level');
+    badge.textContent = i18n.t('hud.levelShort', { level });
+    badge.setAttribute('aria-label', i18n.t('hud.level', { level }));
+    const spoken = needed > 0 ? i18n.t('hud.xp', { current: xp, needed }) : i18n.t('hud.xpMax');
+    this.setBar('xp', xp, needed, spoken, needed > 0 ? i18n.t('hud.bar', { current: xp, max: needed }) : i18n.t('hud.xpMax'));
+  }
+
+  /** Shows whom the hero is fighting or pointing at; null hides the frame. */
+  setTarget(target: { name: string; level: number; hp: number; maxHp: number } | null): void {
+    const frame = element('target');
+    if (frame.hidden !== (target === null)) frame.hidden = target === null;
+    if (!target) return;
+    const state = `${target.name}/${target.level}/${target.hp}/${target.maxHp}`;
+    if (state === this.shownTarget) return;
+    this.shownTarget = state;
+    element('target-name').textContent = target.name;
+    const badge = element('target-level');
+    badge.textContent = this.i18n.t('hud.levelShort', { level: target.level });
+    badge.setAttribute('aria-label', this.i18n.t('hud.level', { level: target.level }));
+    element('target-fill').style.inlineSize = `${Math.max(0, Math.min(100, (target.hp / target.maxHp) * 100))}%`;
+    element('target-text').textContent = this.i18n.t('hud.bar', { current: target.hp, max: target.maxHp });
   }
 
   /** How much experience the last death cost; shown on the defeat screen. */
@@ -120,15 +145,15 @@ export class Hud {
     this.render();
   }
 
-  /** Adds a line to the short list of recent events (pickups and the like). */
+  /** Adds a line to the system messages. The window keeps the last few; older ones fade out with time. */
   log(text: string, warning = false): void {
     const list = element('log');
     const line = document.createElement('li');
     line.textContent = text;
     if (warning) line.className = 'warning';
     list.append(line);
-    while (list.children.length > 5) list.firstElementChild?.remove();
-    window.setTimeout(() => line.remove(), 4500);
+    while (list.children.length > 7) list.firstElementChild?.remove();
+    window.setTimeout(() => line.remove(), 20000);
   }
 
   toast(key: MessageKey): void {
