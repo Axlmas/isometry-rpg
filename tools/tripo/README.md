@@ -52,5 +52,7 @@ tools/tripo/tripo.sh run generation/image-to-model \
 | Boar (walk) | 10 | 110 | 25 | 10 | 155 |
 | Mine ghoul (6 animations) | 10 | 110 | 25 | 60 | 205 |
 | Hero: death and shot clips | — | — | — | 20 | 20 |
+| Hero, ragged and leather looks (each) | 10 | 110 | 25 | 50 | 195 |
 
-All 16 models so far: 1 930 credits.
+All 18 models so far: 2 320 credits. Clips do not carry over between separately
+rigged models (their rest poses differ), so each look gets its own animations.
