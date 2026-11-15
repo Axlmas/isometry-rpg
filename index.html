@@ -1,39 +1,200 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Isometry RPG — 3D lab</title>
-  <style>
-    :root { color-scheme: dark; }
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; color: #e6dcc8;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-    #app { position: fixed; inset: 0; }
-    #app canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-    .panel { position: fixed; background: rgba(18, 16, 14, 0.78); border: 1px solid #6b5432;
-      border-radius: 4px; padding: 8px 10px; font-size: 13px; line-height: 1.45; }
-    #help { left: 12px; top: 12px; max-width: 300px; }
-    #help b { color: #e2b866; font-weight: 600; }
-    #stats { right: 12px; top: 12px; font-variant-numeric: tabular-nums; color: #b9ad97; }
-    #bar { left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; }
-    #bar button { font: inherit; color: #e6dcc8; background: #2a241c; border: 1px solid #6b5432;
-      border-radius: 3px; padding: 6px 12px; cursor: pointer; }
-    #bar button.on { background: #5a4422; border-color: #e2b866; }
-    #bar button:hover { border-color: #e2b866; }
-    #loading { left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 15px; }
-    @media (max-width: 640px) { #help { display: none; } }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Isometry RPG</title>
 </head>
 <body>
-  <div id="app"></div>
-  <div id="help" class="panel">
-    <b>3D-лаборатория</b> — проверка моделей Tripo.<br>
-    Клик по земле или WASD — идти. Пробел — удар.<br>
-    1 / 2 / 3 — сменить оружие. Колесо — приблизить.
+  <div id="game"></div>
+
+  <div id="vignette" aria-hidden="true"></div>
+  <p id="loading" role="status" data-i18n="loading.text"></p>
+
+  <section id="status" class="frame" aria-labelledby="hero-name">
+    <div class="frame-head"><span id="level" class="badge"></span><span id="hero-name"></span></div>
+    <div id="health" class="bar hp" role="meter" aria-valuemin="0"><div id="health-fill" class="fill"></div><span id="health-text"></span></div>
+    <div id="mana" class="bar mp" role="meter" aria-valuemin="0"><div id="mana-fill" class="fill"></div><span id="mana-text"></span></div>
+    <div id="xp" class="bar xp" role="meter" aria-valuemin="0"><div id="xp-fill" class="fill"></div><span id="xp-text"></span></div>
+  </section>
+
+  <section id="target" class="frame" aria-live="off" hidden>
+    <div class="frame-head"><span id="target-level" class="badge"></span><span id="target-name"></span></div>
+    <div class="bar hp"><div id="target-fill" class="fill"></div><span id="target-text"></span></div>
+  </section>
+
+  <section id="map-frame" class="frame">
+    <canvas id="minimap" width="168" height="168" aria-hidden="true"></canvas>
+    <p id="zone"></p>
+    <p id="monsters"></p>
+  </section>
+
+  <section id="chat" class="frame">
+    <ul id="log" aria-live="polite"></ul>
+    <p id="save-status"></p>
+  </section>
+
+  <nav id="menu">
+    <button id="inventory-open" type="button" aria-expanded="false" aria-controls="inventory" data-i18n="inventory.open"></button>
+    <button id="help-open" type="button" aria-expanded="false" aria-controls="help" data-i18n="help.open"></button>
+    <button id="sound" type="button"></button>
+    <button id="language" type="button"></button>
+    <button id="dev-open" type="button" data-i18n="dev.open" hidden></button>
+  </nav>
+
+  <aside id="help" class="panel talk" aria-labelledby="help-title" hidden>
+    <div class="panel-head">
+      <h2 id="help-title" data-i18n="help.title"></h2>
+      <button id="help-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="hint" data-i18n="hud.hint"></p>
+  </aside>
+
+  <aside id="inventory" class="panel" aria-labelledby="inventory-title" hidden>
+    <div class="panel-head">
+      <h2 id="inventory-title" data-i18n="inventory.title"></h2>
+      <button id="inventory-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="hero-stats"></p>
+    <p id="hero-bonus"></p>
+    <h3 data-i18n="inventory.equipped"></h3>
+    <div id="equipment-grid" class="cells"></div>
+    <h3 id="inventory-count"></h3>
+    <div id="bag-grid" class="cells"></div>
+    <p id="coins" class="coins"></p>
+    <div id="item-detail"></div>
+  </aside>
+
+  <aside id="shop" class="panel talk" aria-labelledby="shop-title" hidden>
+    <div class="panel-head">
+      <h2 id="shop-title"></h2>
+      <button id="shop-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="shop-coins"></p>
+    <h3 data-i18n="shop.forSale"></h3>
+    <ul id="shop-stock" class="item-list"></ul>
+    <h3 data-i18n="shop.yourBag"></h3>
+    <p id="shop-empty" class="item-empty" data-i18n="shop.nothingToSell"></p>
+    <ul id="shop-bag" class="item-list"></ul>
+  </aside>
+
+  <aside id="trainer" class="panel talk" aria-labelledby="trainer-title" hidden>
+    <div class="panel-head">
+      <h2 id="trainer-title" data-i18n="npc.trainer"></h2>
+      <button id="trainer-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="trainer-coins" class="coins"></p>
+    <p class="item-detail" data-i18n="trainer.intro"></p>
+    <ul id="trainer-list" class="item-list"></ul>
+  </aside>
+
+  <aside id="forge" class="panel talk" aria-labelledby="forge-title" hidden>
+    <div class="panel-head">
+      <h2 id="forge-title" data-i18n="npc.blacksmith"></h2>
+      <button id="forge-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="forge-coins" class="coins"></p>
+    <div class="tabs" role="tablist">
+      <button id="forge-tab-temper" type="button" role="tab" class="small" aria-controls="forge-temper" data-i18n="forge.tabTemper"></button>
+      <button id="forge-tab-craft" type="button" role="tab" class="small" aria-controls="forge-craft" data-i18n="forge.tabCraft"></button>
+      <button id="forge-tab-stock" type="button" role="tab" class="small" aria-controls="forge-stock-tab" data-i18n="forge.tabStock"></button>
+    </div>
+    <div id="forge-temper" role="tabpanel">
+      <p class="item-detail" data-i18n="forge.intro"></p>
+      <p id="forge-empty" class="item-empty" data-i18n="forge.nothing"></p>
+      <ul id="forge-items" class="item-list"></ul>
+    </div>
+    <div id="forge-craft" role="tabpanel" hidden>
+      <p class="item-detail" data-i18n="craft.intro"></p>
+      <ul id="forge-recipes" class="item-list"></ul>
+    </div>
+    <div id="forge-stock-tab" role="tabpanel" hidden>
+      <ul id="forge-stock" class="item-list"></ul>
+    </div>
+  </aside>
+
+  <aside id="hunter" class="panel talk" aria-labelledby="hunter-title" hidden>
+    <div class="panel-head">
+      <h2 id="hunter-title" data-i18n="npc.hunter"></h2>
+      <button id="hunter-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p class="item-detail" data-i18n="hunter.intro"></p>
+    <ul id="hunter-list" class="item-list"></ul>
+  </aside>
+
+  <aside id="dev" class="panel" aria-labelledby="dev-title" hidden>
+    <div class="panel-head">
+      <h2 id="dev-title" data-i18n="dev.title"></h2>
+      <button id="dev-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p class="item-detail" data-i18n="dev.intro"></p>
+    <div class="dev-buttons">
+      <button id="dev-level" type="button" class="small" data-i18n="dev.level"></button>
+      <button id="dev-coins" type="button" class="small" data-i18n="dev.coins"></button>
+      <button id="dev-kit" type="button" class="small" data-i18n="dev.kit"></button>
+      <button id="dev-gear" type="button" class="small" data-i18n="dev.gear"></button>
+      <button id="dev-heal" type="button" class="small" data-i18n="dev.heal"></button>
+      <button id="dev-clear" type="button" class="small" data-i18n="dev.clear"></button>
+    </div>
+    <h3 data-i18n="dev.teleport"></h3>
+    <div class="dev-buttons">
+      <button id="dev-go-village" type="button" class="small" data-i18n="zone.village"></button>
+      <button id="dev-go-pasture" type="button" class="small" data-i18n="zone.pasture"></button>
+      <button id="dev-go-moor" type="button" class="small" data-i18n="zone.moor"></button>
+      <button id="dev-go-hollow" type="button" class="small" data-i18n="zone.hollow"></button>
+      <button id="dev-go-thicket" type="button" class="small" data-i18n="zone.thicket"></button>
+      <button id="dev-go-mines" type="button" class="small" data-i18n="zone.mines"></button>
+    </div>
+    <h3 data-i18n="dev.danger"></h3>
+    <button id="dev-reset" type="button" class="small" data-i18n="dev.reset"></button>
+  </aside>
+
+  <div id="banner" role="status" hidden>
+    <p id="banner-title"></p>
+    <p id="banner-detail"></p>
   </div>
-  <div id="stats" class="panel"></div>
-  <div id="bar" class="panel"></div>
-  <div id="loading" class="panel">Загрузка моделей…</div>
-  <script type="module" src="/src/main.ts"></script>
+
+  <p id="prompt" hidden></p>
+  <div id="skills" role="toolbar"></div>
+
+  <div id="death" class="overlay" role="alertdialog" aria-labelledby="death-title" aria-describedby="death-body" hidden>
+    <div>
+      <h2 id="death-title" data-i18n="death.title"></h2>
+      <p id="death-body" data-i18n="death.body"></p>
+      <p id="death-xp"></p>
+      <button id="death-respawn" type="button" class="primary" data-i18n="death.respawn"></button>
+    </div>
+  </div>
+
+  <div id="creation" class="overlay" role="dialog" aria-labelledby="creation-title" hidden>
+    <div>
+      <h2 id="creation-title" data-i18n="creation.title"></h2>
+      <h3 data-i18n="creation.race"></h3>
+      <div id="creation-races" class="choices"></div>
+      <h3 data-i18n="creation.class"></h3>
+      <div id="creation-classes" class="choices"></div>
+      <button id="creation-start" type="button" class="primary" data-i18n="creation.start"></button>
+    </div>
+  </div>
+
+  <div id="tooltip" role="tooltip" hidden></div>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div id="error" class="overlay" role="alertdialog" aria-labelledby="error-title" aria-describedby="error-body" hidden>
+    <div>
+      <h2 id="error-title" data-i18n="error.title"></h2>
+      <p id="error-body"></p>
+      <button id="error-reload" type="button" class="primary" data-i18n="error.reload"></button>
+    </div>
+  </div>
+
+  <!-- The only text outside the translation catalogue: without JavaScript the catalogue cannot load. -->
+  <noscript>
+    <p style="padding:24px">This game needs JavaScript. Please enable it and reload the page.<br>
+    Для игры нужен JavaScript. Включите его и перезагрузите страницу.</p>
+  </noscript>
+
+  <script type="module" src="/src/client/main.ts"></script>
 </body>
 </html>

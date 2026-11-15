@@ -1,0 +1,259 @@
+import {
+  CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_SLOW, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
+  PLAYER_RADIUS, PLAYER_REGEN_DELAY, PLAYER_REGEN_INTERVAL, PLAYER_SPEED, SAFE_REGEN_INTERVAL, TICK_MS,
+} from './balance';
+import { clearLine, pushOutOfWalls } from './collision';
+import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
+import { type Point, isWalkable } from './grid';
+import { attackCooldown, dropFromInventory, equipFromInventory, gearStats, pickUpLoot, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
+import { fire, updateProjectiles } from './projectiles';
+import { CLASSES, RACES } from './classes';
+import { craft } from './crafting';
+import { runDevAction } from './dev';
+import { crystallize, enchant } from './enchant';
+import { buy, learn, sell } from './npcs';
+import { travel } from './travel';
+import { findPath } from './pathfinding';
+import { SKILL_IDS, useSkill } from './skills';
+import type { Command, World } from './world';
+import { regionAt } from './zones';
+
+/** Returns the unit vector for a direction, or null when it is zero or not a number. */
+function normalize(dx: number, dy: number): Point | null {
+  const length = Math.hypot(dx, dy);
+  return Number.isFinite(length) && length > 0 ? { x: dx / length, y: dy / length } : null;
+}
+
+function planRoute(world: World, target: Point): Point[] | null {
+  const { player, map } = world;
+  if (![target.x, target.y].every(Number.isFinite)) return null;
+  const goalTile = { x: Math.round(target.x), y: Math.round(target.y) };
+  if (!isWalkable(map, goalTile.x, goalTile.y)) return null; // Walls are not a destination.
+  const startTile = { x: Math.round(player.pos.x), y: Math.round(player.pos.y) };
+  const tiles = findPath(map, startTile, goalTile);
+  if (tiles === null) return null;
+
+  // The grid is only used to find a way around walls. The exact clicked point
+  // is the destination, nudged away from a wall if the hero would not fit.
+  const destination = pushOutOfWalls(map, target, PLAYER_RADIUS);
+  const waypoints: Point[] = [startTile, ...tiles, destination];
+
+  // Drop every waypoint the hero can walk past in a straight line, so the
+  // route looks free-form instead of following tile centres.
+  const route: Point[] = [];
+  let from = player.pos;
+  let index = 0;
+  while (index < waypoints.length) {
+    let furthest = index;
+    for (let i = waypoints.length - 1; i > index; i--) {
+      if (clearLine(map, from, waypoints[i] as Point, PLAYER_RADIUS)) {
+        furthest = i;
+        break;
+      }
+    }
+    from = waypoints[furthest] as Point;
+    route.push({ ...from });
+    index = furthest + 1;
+  }
+  return route;
+}
+
+function applyCommand(world: World, command: Command): void {
+  const { player } = world;
+  if (command.type === 'respawn') {
+    if (player.hp > 0) return;
+    player.pos = { ...world.spawn };
+    player.hp = player.maxHp;
+    player.mp = player.maxMp;
+    player.attackCooldown = 0;
+    player.ticksSinceHurt = 0;
+    // In the open world the monsters simply lose interest; a dungeon is reset.
+    if (world.zone === 'dungeon') resetMonsters(world);
+    world.events.push({ type: 'playerRespawned' });
+    return;
+  }
+  if (player.hp <= 0) return; // The dead take no orders.
+
+  switch (command.type) {
+    case 'moveDir': {
+      // Normalised here so that no input can exceed the speed limit.
+      const dir = normalize(command.dx, command.dy);
+      player.moveDir = dir ?? { x: 0, y: 0 };
+      if (dir) player.path = [];
+      return;
+    }
+    case 'moveTo': {
+      const route = planRoute(world, { x: command.x, y: command.y });
+      if (route === null) return;
+      player.path = route;
+      player.moveDir = { x: 0, y: 0 };
+      return;
+    }
+    case 'attack': {
+      const dir = normalize(command.dx, command.dy);
+      if (dir === null || player.attackCooldown > 0) return;
+      player.facing = dir;
+      player.attackCooldown = attackCooldown(player);
+      const charged = spendCharge(world);
+      // A bow or a staff looses a missile; a sword, or a bare fist, swings.
+      const ranged = weaponInHand(player) === 'bow' || weaponInHand(player) === 'staff';
+      player.pendingAttack = {
+        dir,
+        ticks: PLAYER_ATTACK_WINDUP,
+        arc: PLAYER_ATTACK_ARC,
+        range: PLAYER_ATTACK_RANGE,
+        multiplier: charged ? CHARGE_DAMAGE_MULTIPLIER : 1,
+        charged,
+        cleave: false,
+        shot: ranged ? { count: 1, spread: 0, pierce: false, splash: 0 } : null,
+      };
+      world.events.push(ranged ? { type: 'playerShot', dir, charged } : { type: 'playerSwing', dir, charged });
+      return;
+    }
+    case 'skill':
+      useSkill(world, command.id, normalize(command.dx, command.dy));
+      return;
+    case 'equip':
+      equipFromInventory(world, command.index);
+      return;
+    case 'unequip':
+      unequip(world, command.slot);
+      return;
+    case 'drop':
+      dropFromInventory(world, command.index);
+      return;
+    case 'use':
+      useItem(world, command.itemId);
+      return;
+    case 'toggleCharges':
+      toggleCharges(world);
+      return;
+    case 'buy':
+      buy(world, command.itemId, command.count);
+      return;
+    case 'sell':
+      sell(world, command.index, command.count);
+      return;
+    case 'travel':
+      travel(world);
+      return;
+    case 'dev':
+      runDevAction(world, command);
+      return;
+    case 'learn':
+      learn(world, command.id);
+      return;
+    case 'enchant':
+      enchant(world, command.target);
+      return;
+    case 'crystallize':
+      crystallize(world, command.index);
+      return;
+    case 'craft':
+      craft(world, command.recipe);
+      return;
+  }
+}
+
+function movePlayer(world: World): void {
+  const { player, map } = world;
+  const before = { ...player.pos };
+  const haste = player.hasteTicks > 0 ? player.hasteFactor : 1;
+  // Striking roots the hero for a moment: one can fight or run, not both at once.
+  const striking = player.attackCooldown > 0 || player.pendingAttack !== null ? PLAYER_ATTACK_SLOW : 1;
+  let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * striking * (1 + gearStats(player).speed / 100) * TICK_MS) / 1000;
+
+  if (player.moveDir.x !== 0 || player.moveDir.y !== 0) {
+    player.pos = pushOutOfWalls(
+      map,
+      { x: player.pos.x + player.moveDir.x * remaining, y: player.pos.y + player.moveDir.y * remaining },
+      PLAYER_RADIUS,
+    );
+  } else if (player.path.length > 0) {
+    while (remaining > 0 && player.path.length > 0) {
+      const target = player.path[0] as Point;
+      const dx = target.x - player.pos.x;
+      const dy = target.y - player.pos.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance <= remaining) {
+        player.pos = { ...target };
+        player.path.shift();
+        remaining -= distance;
+      } else {
+        player.pos = { x: player.pos.x + (dx / distance) * remaining, y: player.pos.y + (dy / distance) * remaining };
+        remaining = 0;
+      }
+    }
+    player.pos = pushOutOfWalls(map, player.pos, PLAYER_RADIUS);
+    // Safety net: if something blocks the route, give up instead of pushing forever.
+    if (player.path.length > 0 && Math.hypot(player.pos.x - before.x, player.pos.y - before.y) < 1e-6) player.path = [];
+  }
+
+  const dx = player.pos.x - before.x;
+  const dy = player.pos.y - before.y;
+  const walked = Math.hypot(dx, dy);
+  player.distance += walked;
+  // The hero looks where they walk, unless a swing is in progress.
+  if (walked > 1e-6 && player.pendingAttack === null && player.attackCooldown === 0) {
+    player.facing = { x: dx / walked, y: dy / walked };
+  }
+}
+
+/** Advances the world by one tick. Mutates `world`. */
+export function step(world: World, commands: readonly Command[] = []): void {
+  world.events = [];
+  for (const command of commands) applyCommand(world, command);
+
+  const { player } = world;
+  if (player.hp > 0) {
+    movePlayer(world);
+
+    if (player.attackCooldown > 0) player.attackCooldown -= 1;
+    if (player.potionCooldown > 0) player.potionCooldown -= 1;
+    if (player.streakTicks > 0) {
+      player.streakTicks -= 1;
+      if (player.streakTicks === 0) player.streak = 0;
+    }
+    if (player.hasteTicks > 0) player.hasteTicks -= 1;
+    for (const id of SKILL_IDS) {
+      if (player.skillCooldowns[id] > 0) player.skillCooldowns[id] -= 1;
+    }
+    if (player.mp < player.maxMp && world.tick % PLAYER_MP_REGEN_INTERVAL === 0) player.mp += 1;
+    if (player.pendingAttack) {
+      player.pendingAttack.ticks -= 1;
+      if (player.pendingAttack.ticks <= 0) {
+        const attack = player.pendingAttack;
+        player.pendingAttack = null;
+        if (attack.shot) {
+          // A skill may ask for a shot while the hero holds nothing: the class's own weapon decides how it flies.
+          const held = weaponInHand(player);
+          const weapon = held === 'bow' || held === 'staff' ? held : CLASSES[player.cls].weapon;
+          if (weapon !== 'sword') fire(world, weapon, attack);
+        } else {
+          resolvePlayerAttack(world, attack);
+        }
+      }
+    }
+  }
+
+  updateProjectiles(world);
+  updateMonsters(world);
+  if (player.hp > 0) pickUpLoot(world);
+
+  if (player.hp > 0) {
+    player.ticksSinceHurt += 1;
+    // Resting in a safe place restores the hero quickly.
+    if (regionAt(world.zone, player.pos).safe && world.tick % SAFE_REGEN_INTERVAL === 0) {
+      if (player.hp < player.maxHp) player.hp += 1;
+      if (player.mp < player.maxMp) player.mp += 1;
+    }
+    if (
+      player.hp < player.maxHp &&
+      player.ticksSinceHurt >= PLAYER_REGEN_DELAY &&
+      (player.ticksSinceHurt - PLAYER_REGEN_DELAY) % PLAYER_REGEN_INTERVAL === 0
+    ) {
+      player.hp += 1;
+    }
+  }
+  world.tick += 1;
+}
