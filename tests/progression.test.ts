@@ -6,7 +6,8 @@ import {
 } from '../src/sim';
 
 function arena(offsets: Array<[number, number]>, level = 1, dungeonLevel = 1): World {
-  const world = createWorld(5, { ...newCharacter('trainingSword'), level }, dungeonLevel);
+  // The hero has already been taught every skill; the trainer is covered in npcs.test.ts.
+  const world = createWorld(5, { ...newCharacter('trainingSword'), level, skills: ['heavyBlow', 'sweep', 'secondWind'] }, dungeonLevel);
   const { map } = world;
   for (let y = 1; y < map.height - 1; y++) {
     for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;

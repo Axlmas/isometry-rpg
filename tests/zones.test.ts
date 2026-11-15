@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type Monster, type World, type ZoneKind, EXIT_RANGE, HOLLOW_BORDER, MINES_MIN_LEVEL, MONSTER_KINDS, MONSTER_LEASH,
   MONSTER_RESPAWN_TIME, PLAYER_MAX_HP, REGIONS, ROAD_ROW, WORLD_HEIGHT, WORLD_WIDTH, characterOf, circleFree,
-  createWorld, findPath, isNearMerchant, isRoad, isWalkable, minesLevelFor, monsterMaxHp, monsterXp, nearestExit,
+  createWorld, findPath, isRoad, isWalkable, minesLevelFor, monsterMaxHp, monsterXp, nearestExit,
   newCharacter, regionAt, step, travelerOf,
 } from '../src/sim';
 
@@ -45,9 +45,9 @@ describe('open world', () => {
     }
   });
 
-  it('lets the hero walk from the village to the merchant, every monster and the mines', () => {
+  it('lets the hero walk from the village square to every villager, every monster and the mines', () => {
     const from = tile(world.player.pos);
-    const targets = [world.merchant!, ...world.exits.map((e) => e.pos), ...world.monsters.map((m) => m.home)];
+    const targets = [...world.npcs.map((n) => n.pos), ...world.exits.map((e) => e.pos), ...world.monsters.map((m) => m.home)];
     for (const target of targets) {
       expect(isWalkable(world.map, target.x, target.y)).toBe(true);
       expect(findPath(world.map, from, tile(target))).not.toBeNull();
@@ -116,13 +116,6 @@ describe('regions', () => {
 });
 
 describe('the village', () => {
-  it('has the merchant', () => {
-    const world = build('overworld');
-    expect(regionAt('overworld', world.merchant!).id).toBe('village');
-    world.player.pos = { x: world.merchant!.x + 1, y: world.merchant!.y };
-    expect(isNearMerchant(world)).toBe(true);
-  });
-
   it('restores a resting hero quickly', () => {
     const world = build('overworld');
     world.player.hp = 1;
@@ -210,9 +203,9 @@ describe('monsters in the open world', () => {
 });
 
 describe('the mines', () => {
-  it('are a separate map with no merchant, at least level 4, matching a stronger hero', () => {
+  it('are a separate map with no villagers, at least level 4, matching a stronger hero', () => {
     const world = build('dungeon');
-    expect(world.merchant).toBeNull();
+    expect(world.npcs).toEqual([]);
     expect(world.dungeonLevel).toBe(MINES_MIN_LEVEL);
     expect(world.monsters.every((m) => m.kind === 'grunt' && m.level === MINES_MIN_LEVEL)).toBe(true);
     expect(build('dungeon', 1, null, 12).monsters[0]?.level).toBe(12);

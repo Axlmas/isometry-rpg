@@ -8,8 +8,10 @@ import type { Point } from './grid';
 import { dropLoot, playerDamage, playerDefense } from './inventory';
 import {
   DROP_CHARGES_CHANCE, DROP_CHARGES_COUNT, DROP_COINS, DROP_D_EQUIPMENT_CHANCE, DROP_MATERIAL_CHANCE,
-  DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE, DROP_POTIONS, DROP_POTION_CHANCE, MATERIAL_IDS, droppableEquipment,
+  DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE, DROP_POTIONS, DROP_POTION_CHANCE, DROP_SCROLLS, DROP_SCROLL_CHANCE,
+  MATERIAL_IDS, droppableEquipment,
 } from './items';
+import { guardDuty } from './npcs';
 import { findPath } from './pathfinding';
 import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterXp } from './progression';
 import { createRng } from './rng';
@@ -45,6 +47,17 @@ function dropMonsterLoot(world: World, at: Point): void {
   else if (chance <= dGrade) dropLoot(world, pick(world, droppableEquipment('d')), 1, beside);
   else if (chance <= potion) dropLoot(world, pick(world, DROP_POTIONS), 1, beside);
   else if (chance <= charges) dropLoot(world, 'chargePlain', roll(world, DROP_CHARGES_COUNT), beside);
+  else if (chance <= charges + DROP_SCROLL_CHANCE) dropLoot(world, pick(world, DROP_SCROLLS), 1, beside);
+}
+
+/** Removes dead monsters. In the open world they come back after a while; a dungeon stays cleared. */
+function buryTheDead(world: World): void {
+  if (world.zone === 'overworld') {
+    for (const monster of world.monsters) {
+      if (monster.hp === 0) world.respawns.push({ ticks: MONSTER_RESPAWN_TIME, monster });
+    }
+  }
+  world.monsters = world.monsters.filter((monster) => monster.hp > 0);
 }
 
 /** Lands the hero's blow: damages every monster inside the swing. */
@@ -84,13 +97,7 @@ export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
       xp += monsterXp(monster.level, monster.kind);
     }
   }
-  // In the open world the dead come back after a while; a dungeon stays cleared.
-  if (world.zone === 'overworld') {
-    for (const monster of world.monsters) {
-      if (monster.hp === 0) world.respawns.push({ ticks: MONSTER_RESPAWN_TIME, monster });
-    }
-  }
-  world.monsters = world.monsters.filter((monster) => monster.hp > 0);
+  buryTheDead(world);
   grantXp(world, xp);
 }
 
@@ -269,6 +276,8 @@ export function updateMonsters(world: World): void {
     }
   }
   separate(world);
+  guardDuty(world);
+  buryTheDead(world);
 }
 
 /** Puts surviving monsters back where they started, at full health. */

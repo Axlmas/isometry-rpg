@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type Monster, type World, CHARGE_DAMAGE_MULTIPLIER, INVENTORY_SLOTS, ITEMS, MERCHANT_RANGE, PLAYER_ATTACK_WINDUP,
+  type Monster, type World, CHARGE_DAMAGE_MULTIPLIER, INVENTORY_SLOTS, ITEMS, NPC_RANGE, PLAYER_ATTACK_WINDUP,
   POTION_COOLDOWN, SHOP_STOCK, addItem, buyPrice, canFit, circleFree, countItem, createWorld, isNearMerchant,
   newCharacter, removeItem, sellPrice, step,
 } from '../src/sim';
 
 function arena(offsets: Array<[number, number]> = [], level = 1, zone: 'dungeon' | 'overworld' = 'dungeon'): World {
-  const world = createWorld(5, { ...newCharacter('trainingSword'), level }, undefined, zone);
+  const world = createWorld(5, { ...newCharacter('trainingSword'), level, skills: ['heavyBlow', 'sweep', 'secondWind'] }, undefined, zone);
   if (zone === 'overworld') return world;
   const { map } = world;
   for (let y = 1; y < map.height - 1; y++) {
@@ -170,16 +170,17 @@ describe('weapon charges', () => {
 });
 
 describe('merchant', () => {
-  /** A hero standing next to the village merchant. */
+  const alchemist = (world: World) => world.npcs.find((npc) => npc.kind === 'alchemist')!.pos;
+  /** A hero standing next to the village alchemist. */
   const shop = (): World => {
     const world = arena([], 1, 'overworld');
-    world.player.pos = { x: world.merchant!.x + 1, y: world.merchant!.y };
+    world.player.pos = { x: alchemist(world).x, y: alchemist(world).y + 1 };
     return world;
   };
 
   it('stands on a free tile in the village', () => {
     const world = arena([], 1, 'overworld');
-    expect(circleFree(world.map, world.merchant!, 0.3)).toBe(true);
+    expect(circleFree(world.map, alchemist(world), 0.3)).toBe(true);
     expect(isNearMerchant(shop())).toBe(true);
   });
 
@@ -209,13 +210,13 @@ describe('merchant', () => {
     const full = shop();
     full.player.coins = 10000;
     while (full.player.inventory.length < INVENTORY_SLOTS) full.player.inventory.push({ itemId: 'ironSword', count: 1 });
-    step(full, [{ type: 'buy', itemId: 'leatherCap', count: 1 }]);
+    step(full, [{ type: 'buy', itemId: 'healthPotion', count: 1 }]);
     expect(full.events).toEqual([{ type: 'tradeDenied', reason: 'full' }]);
     expect(full.player.coins).toBe(10000);
 
     const far = shop();
     far.player.coins = 10000;
-    far.player.pos = { x: far.merchant!.x + MERCHANT_RANGE + 0.5, y: far.merchant!.y };
+    far.player.pos = { x: alchemist(far).x + NPC_RANGE + 0.5, y: alchemist(far).y + 2 };
     addItem(far.player, 'coal', 3);
     step(far, [{ type: 'buy', itemId: 'healthPotion', count: 1 }, { type: 'sell', index: 0, count: 1 }]);
     expect(types(far)).toEqual(['tradeDenied', 'tradeDenied']);
@@ -250,7 +251,7 @@ describe('merchant', () => {
   });
 
   it('never pays more than he charges, and refuses worthless things and wrong amounts', () => {
-    for (const itemId of SHOP_STOCK) expect(sellPrice(itemId)).toBeLessThan(buyPrice(itemId));
+    for (const itemId of Object.values(SHOP_STOCK).flat()) expect(sellPrice(itemId)).toBeLessThan(buyPrice(itemId));
     for (const def of Object.values(ITEMS)) expect(sellPrice(def.id) * 2).toBeLessThanOrEqual(buyPrice(def.id));
     const world = shop();
     addItem(world.player, 'chargePlain', 50); // worth 1 coin each, sells for nothing
@@ -267,7 +268,7 @@ describe('merchant', () => {
     const world = shop();
     world.player.coins = 1000;
     for (let i = 0; i < 20; i++) {
-      step(world, [{ type: 'buy', itemId: 'ironSword', count: 1 }]);
+      step(world, [{ type: 'buy', itemId: 'healthPotion', count: 1 }]);
       step(world, [{ type: 'sell', index: 0, count: 1 }]);
     }
     expect(world.player.coins).toBeLessThan(1000);

@@ -2,6 +2,8 @@ import { MAX_LEVEL, type MonsterKind, WORLD_SEED } from './balance';
 import type { GridMap, Point } from './grid';
 import { type Character, type ItemStack, newCharacter } from './inventory';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
+import type { ItemTarget } from './enchant';
+import type { Npc, NpcKind } from './npcs';
 import { maxHpAtLevel, maxMpAtLevel, monsterMaxHp } from './progression';
 import { createRng } from './rng';
 import type { SkillId } from './skills';
@@ -48,6 +50,8 @@ export interface Player {
   maxMp: number;
   /** Ticks until each skill can be used again. */
   skillCooldowns: Record<SkillId, number>;
+  /** Skills the hero has been taught by the trainer. */
+  skills: SkillId[];
   /** When on, every blow spends a weapon charge and hits harder. */
   chargesOn: boolean;
   /** Ticks until the next potion can be drunk. */
@@ -56,6 +60,8 @@ export interface Player {
   /** At most INVENTORY_SLOTS stacks. */
   inventory: ItemStack[];
   equipment: Record<EquipSlot, ItemId | null>;
+  /** Enchantment level of each worn item. */
+  equipmentEnchant: Record<EquipSlot, number>;
   /** Goes up whenever coins, inventory or equipment change, so the client knows when to redraw them. */
   revision: number;
 }
@@ -65,6 +71,8 @@ export interface GroundLoot {
   id: number;
   itemId: ItemId;
   count: number;
+  /** Enchantment level of a piece of equipment; left out when it is zero. */
+  enchant?: number;
   pos: Point;
   /** True while the hero should not pick it up: just dropped, or no room for it. */
   ignored: boolean;
@@ -112,8 +120,17 @@ export type GameEvent =
   | { type: 'chargesEmpty' }
   | { type: 'bought'; itemId: ItemId; count: number; cost: number }
   | { type: 'sold'; itemId: ItemId; count: number; gain: number }
-  | { type: 'tradeDenied'; reason: 'far' | 'coins' | 'full' | 'worthless' }
-  | { type: 'skillDenied'; id: SkillId; reason: 'locked' | 'cooldown' | 'mana' }
+  | { type: 'tradeDenied'; reason: 'far' | 'coins' | 'full' | 'worthless' | 'notSold' }
+  | { type: 'skillDenied'; id: SkillId; reason: 'locked' | 'unlearned' | 'cooldown' | 'mana' }
+  | { type: 'skillLearned'; id: SkillId }
+  | { type: 'learnDenied'; id: SkillId; reason: 'far' | 'level' | 'coins' }
+  | { type: 'enchanted'; itemId: ItemId; level: number }
+  /** The attempt failed and the item was destroyed; `level` is what it had. */
+  | { type: 'enchantFailed'; itemId: ItemId; level: number; crystals: number }
+  | { type: 'enchantDenied'; reason: 'far' | 'scroll' | 'max' }
+  | { type: 'crystallized'; itemId: ItemId; crystals: number }
+  | { type: 'crystallizeDenied'; reason: 'far' | 'noCrystals' | 'full' }
+  | { type: 'guardStrike'; npcId: number; monsterId: number; damage: number; pos: Point; died: boolean }
   | { type: 'playerRespawned' }
   | { type: 'lootDropped'; id: number }
   | { type: 'itemPicked'; itemId: ItemId; count: number }
@@ -129,8 +146,8 @@ export interface World {
   map: GridMap;
   zone: ZoneKind;
   spawn: Point;
-  /** Where the merchant stands, if this zone has one. Monsters ignore him. */
-  merchant: Point | null;
+  /** The people of this map: merchants, the trainer, guards. Monsters ignore them. */
+  npcs: Npc[];
   exits: ZoneExit[];
   player: Player;
   /** Living monsters, ordered by id. */
@@ -172,6 +189,11 @@ export type Command =
   /** Trade with the merchant; only works next to him. */
   | { type: 'buy'; itemId: ItemId; count: number }
   | { type: 'sell'; index: number; count: number }
+  /** Learn a skill from the trainer. */
+  | { type: 'learn'; id: SkillId }
+  /** Have the blacksmith enchant an item, or break one from the bag into crystals. */
+  | { type: 'enchant'; target: ItemTarget }
+  | { type: 'crystallize'; index: number }
   /** Leave through the exit the hero is standing at. */
   | { type: 'travel' };
 
@@ -227,7 +249,7 @@ export function createWorld(
     map,
     zone,
     spawn,
-    merchant: layout.merchant,
+    npcs: layout.npcs.map((npc, id) => ({ id, kind: npc.kind, pos: npc.pos, cooldown: 0 })),
     exits: layout.exits,
     player: {
       pos: { ...arrival },
@@ -242,6 +264,7 @@ export function createWorld(
       mp: carried(character.mp, 0, maxMpAtLevel(level)),
       maxMp: maxMpAtLevel(level),
       skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0 },
+      skills: [...(character.skills ?? [])],
       chargesOn: false,
       potionCooldown: 0,
       facing: { x: 1, y: 1 },
@@ -251,6 +274,7 @@ export function createWorld(
       coins: character.coins,
       inventory: character.inventory.map((stack) => ({ ...stack })),
       equipment: { ...character.equipment },
+      equipmentEnchant: { weapon: 0, helmet: 0, armor: 0, boots: 0, ...character.equipmentEnchant },
       revision: 0,
     },
     monsters,
@@ -271,3 +295,5 @@ export function isMoving(world: World): boolean {
   const { moveDir, path } = world.player;
   return moveDir.x !== 0 || moveDir.y !== 0 || path.length > 0;
 }
+
+export type { NpcKind };

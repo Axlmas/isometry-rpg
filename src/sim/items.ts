@@ -17,7 +17,9 @@ export type ItemId =
   | 'leatherCap' | 'ironHelm'
   | 'leatherJerkin' | 'chainShirt'
   | 'leatherBoots' | 'ironGreaves'
-  | 'healthPotion' | 'manaPotion' | 'chargePlain' | 'chargeD';
+  | 'healthPotion' | 'manaPotion' | 'chargePlain' | 'chargeD'
+  | 'crystalD'
+  | 'scrollWeaponPlain' | 'scrollArmorPlain' | 'scrollWeaponD' | 'scrollArmorD';
 
 export type ConsumableEffect =
   | { kind: 'heal'; amount: number }
@@ -32,6 +34,8 @@ export type ItemDef =
   /** Crafting resource; identical ones share a slot up to `maxStack`. */
   | { id: ItemId; kind: 'material'; maxStack: number; price: number }
   | { id: ItemId; kind: 'consumable'; maxStack: number; price: number; effect: ConsumableEffect }
+  /** Spent at the blacksmith to enchant a weapon or a piece of armour of the given grade. */
+  | { id: ItemId; kind: 'scroll'; maxStack: number; price: number; target: 'weapon' | 'armor'; grade: Grade }
   | { id: ItemId; kind: 'equipment'; slot: 'weapon'; grade: Grade; damage: readonly [number, number]; price: number }
   | { id: ItemId; kind: 'equipment'; slot: Exclude<EquipSlot, 'weapon'>; grade: Grade; defense: number; price: number };
 
@@ -64,6 +68,13 @@ export const ITEMS: Readonly<Record<ItemId, ItemDef>> = {
   chargePlain: { id: 'chargePlain', kind: 'consumable', maxStack: CHARGE_STACK, price: 1, effect: { kind: 'charge', grade: 'none' } },
   chargeD: { id: 'chargeD', kind: 'consumable', maxStack: CHARGE_STACK, price: 3, effect: { kind: 'charge', grade: 'd' } },
 
+  crystalD: { id: 'crystalD', kind: 'material', maxStack: 999, price: 12 },
+
+  scrollWeaponPlain: { id: 'scrollWeaponPlain', kind: 'scroll', maxStack: MATERIAL_STACK, price: 120, target: 'weapon', grade: 'none' },
+  scrollArmorPlain: { id: 'scrollArmorPlain', kind: 'scroll', maxStack: MATERIAL_STACK, price: 60, target: 'armor', grade: 'none' },
+  scrollWeaponD: { id: 'scrollWeaponD', kind: 'scroll', maxStack: MATERIAL_STACK, price: 600, target: 'weapon', grade: 'd' },
+  scrollArmorD: { id: 'scrollArmorD', kind: 'scroll', maxStack: MATERIAL_STACK, price: 300, target: 'armor', grade: 'd' },
+
   ironGreaves: { id: 'ironGreaves', kind: 'equipment', slot: 'boots', grade: 'd', defense: 2, price: 420 },
 };
 
@@ -85,14 +96,11 @@ export const DROP_PLAIN_EQUIPMENT_CHANCE = 15;
 export const DROP_D_EQUIPMENT_CHANCE = 5;
 export const DROP_POTION_CHANCE = 8;
 export const DROP_CHARGES_CHANCE = 10;
+export const DROP_SCROLL_CHANCE = 4;
+export const DROP_SCROLLS: readonly ItemId[] = ['scrollWeaponPlain', 'scrollArmorPlain', 'scrollArmorPlain', 'scrollWeaponD', 'scrollArmorD'];
 export const DROP_MATERIAL_COUNT: readonly [number, number] = [1, 2];
 export const DROP_CHARGES_COUNT: readonly [number, number] = [8, 20];
 export const DROP_POTIONS: readonly ItemId[] = ['healthPotion', 'manaPotion'];
-
-/** What the merchant sells, in the order shown. He buys anything that has a price. */
-export const SHOP_STOCK: readonly ItemId[] = [
-  'healthPotion', 'manaPotion', 'chargePlain', 'chargeD', 'ironSword', 'leatherCap', 'leatherJerkin', 'leatherBoots',
-];
 
 export function buyPrice(itemId: ItemId): number {
   const def = ITEMS[itemId];
@@ -106,10 +114,17 @@ export function sellPrice(itemId: ItemId): number {
 
 export function maxStackOf(itemId: ItemId): number {
   const def = ITEMS[itemId];
-  return def.kind === 'material' || def.kind === 'consumable' ? def.maxStack : 1;
+  return def.kind === 'equipment' || def.kind === 'currency' ? 1 : def.maxStack;
 }
 
-export const MATERIAL_IDS: readonly ItemId[] = (Object.keys(ITEMS) as ItemId[]).filter((id) => ITEMS[id].kind === 'material');
+/** Materials that monsters drop. Crystals are not among them: they only come from broken equipment. */
+export const MATERIAL_IDS: readonly ItemId[] = (Object.keys(ITEMS) as ItemId[]).filter((id) => ITEMS[id].kind === 'material' && id !== 'crystalD');
+
+/** How many crystals an item turns into when it is broken up. Only graded equipment gives any. */
+export function crystalsFor(itemId: ItemId): number {
+  const def = ITEMS[itemId];
+  return def.kind === 'equipment' && def.grade === 'd' ? Math.round(def.price / 30) : 0;
+}
 /** Equipment that monsters can drop, by grade. The starting weapon is never dropped. */
 export function droppableEquipment(grade: Grade): ItemId[] {
   return (Object.keys(ITEMS) as ItemId[]).filter((id) => {

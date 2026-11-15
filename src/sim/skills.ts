@@ -65,6 +65,11 @@ export function useSkill(world: World, id: SkillId, dir: Point | null): void {
     world.events.push({ type: 'skillDenied', id, reason: 'locked' });
     return;
   }
+  // Reaching the level is not enough: the trainer has to teach the skill.
+  if (!player.skills.includes(id)) {
+    world.events.push({ type: 'skillDenied', id, reason: 'unlearned' });
+    return;
+  }
   if (player.skillCooldowns[id] > 0) {
     world.events.push({ type: 'skillDenied', id, reason: 'cooldown' });
     return;

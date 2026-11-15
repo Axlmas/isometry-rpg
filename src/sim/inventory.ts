@@ -1,12 +1,16 @@
 import { INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
 import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
-import { type EquipSlot, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, maxStackOf } from './items';
+import { ENCHANT_ARMOR_BONUS, ENCHANT_WEAPON_BONUS } from './balance';
+import { type EquipSlot, type ItemDef, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, maxStackOf } from './items';
+import type { SkillId } from './skills';
 import type { Player, World } from './world';
 
 export interface ItemStack {
   itemId: ItemId;
   count: number;
+  /** Enchantment level of a piece of equipment; left out when it is zero. */
+  enchant?: number;
 }
 
 /** Everything the hero keeps when moving on to another dungeon. */
@@ -17,9 +21,18 @@ export interface Character {
   coins: number;
   inventory: ItemStack[];
   equipment: Record<EquipSlot, ItemId | null>;
+  /** Enchantment level of each worn item; all zero when left out. */
+  equipmentEnchant?: Record<EquipSlot, number>;
+  /** Skills learned from the trainer; none when left out. */
+  skills?: SkillId[];
   /** Current health and mana, when they should carry over; otherwise the hero arrives fully restored. */
   hp?: number;
   mp?: number;
+}
+
+/** What `level` points of enchantment add to an item's damage (weapons) or defence (armour). */
+export function enchantBonus(def: Extract<ItemDef, { kind: 'equipment' }>, level: number): number {
+  return level * (def.slot === 'weapon' ? ENCHANT_WEAPON_BONUS[def.grade] : ENCHANT_ARMOR_BONUS);
 }
 
 export function newCharacter(startingWeapon: ItemId): Character {
@@ -27,8 +40,14 @@ export function newCharacter(startingWeapon: ItemId): Character {
 }
 
 export function characterOf(world: World): Character {
-  const { level, xp, coins, inventory, equipment } = world.player;
-  return { level, xp, coins, inventory: inventory.map((stack) => ({ ...stack })), equipment: { ...equipment } };
+  const { level, xp, coins, inventory, equipment, equipmentEnchant, skills } = world.player;
+  return {
+    level, xp, coins,
+    inventory: inventory.map((stack) => ({ ...stack })),
+    equipment: { ...equipment },
+    equipmentEnchant: { ...equipmentEnchant },
+    skills: [...skills],
+  };
 }
 
 /** Like `characterOf`, but the hero also keeps their current health and mana: for walking between zones. */
@@ -39,7 +58,9 @@ export function travelerOf(world: World): Character {
 export function playerDamage(player: Player): readonly [number, number] {
   const weapon = player.equipment.weapon;
   const def = weapon ? ITEMS[weapon] : null;
-  return def && def.kind === 'equipment' && def.slot === 'weapon' ? def.damage : UNARMED_DAMAGE;
+  if (!def || def.kind !== 'equipment' || def.slot !== 'weapon') return UNARMED_DAMAGE;
+  const bonus = enchantBonus(def, player.equipmentEnchant.weapon);
+  return [def.damage[0] + bonus, def.damage[1] + bonus];
 }
 
 export function playerDefense(player: Player): number {
@@ -47,7 +68,7 @@ export function playerDefense(player: Player): number {
   for (const slot of EQUIP_SLOTS) {
     const itemId = player.equipment[slot];
     const def = itemId ? ITEMS[itemId] : null;
-    if (def && def.kind === 'equipment' && def.slot !== 'weapon') total += def.defense;
+    if (def && def.kind === 'equipment' && def.slot !== 'weapon') total += def.defense + enchantBonus(def, player.equipmentEnchant[slot]);
   }
   return total;
 }
@@ -55,8 +76,9 @@ export function playerDefense(player: Player): number {
 /**
  * Adds items to the purse or the inventory. Returns how many did not fit.
  * Materials fill existing stacks first, then free slots.
+ * `enchant` is the enchantment level of a piece of equipment.
  */
-export function addItem(player: Player, itemId: ItemId, count: number): number {
+export function addItem(player: Player, itemId: ItemId, count: number, enchant = 0): number {
   const def = ITEMS[itemId];
   let left = count;
   if (def.kind === 'currency') {
@@ -75,7 +97,7 @@ export function addItem(player: Player, itemId: ItemId, count: number): number {
     }
     while (left > 0 && player.inventory.length < INVENTORY_SLOTS) {
       const moved = Math.min(left, maxStack);
-      player.inventory.push({ itemId, count: moved });
+      player.inventory.push(enchant > 0 ? { itemId, count: moved, enchant } : { itemId, count: moved });
       left -= moved;
     }
   }
@@ -175,10 +197,10 @@ export function useItem(world: World, itemId: ItemId): void {
 }
 
 /** Puts an item on the floor. `ignored` keeps the hero from picking it right back up. */
-export function dropLoot(world: World, itemId: ItemId, count: number, at: Point, ignored = false): void {
+export function dropLoot(world: World, itemId: ItemId, count: number, at: Point, ignored = false, enchant = 0): void {
   const id = world.nextLootId;
   world.nextLootId += 1;
-  world.loot.push({ id, itemId, count, pos: pushOutOfWalls(world.map, at, PLAYER_RADIUS), ignored });
+  world.loot.push({ id, itemId, count, pos: pushOutOfWalls(world.map, at, PLAYER_RADIUS), ignored, ...(enchant > 0 ? { enchant } : {}) });
   world.events.push({ type: 'lootDropped', id });
 }
 
@@ -193,7 +215,7 @@ export function pickUpLoot(world: World): void {
       continue;
     }
     if (loot.ignored) continue;
-    const left = addItem(player, loot.itemId, loot.count);
+    const left = addItem(player, loot.itemId, loot.count, loot.enchant ?? 0);
     if (left < loot.count) world.events.push({ type: 'itemPicked', itemId: loot.itemId, count: loot.count - left });
     loot.count = left;
     if (left > 0) {
@@ -214,8 +236,10 @@ export function equipFromInventory(world: World, index: number): void {
   const def = ITEMS[stack.itemId];
   if (def.kind !== 'equipment') return;
   const previous = player.equipment[def.slot];
+  const previousEnchant = player.equipmentEnchant[def.slot];
   player.equipment[def.slot] = stack.itemId;
-  if (previous) player.inventory[index] = { itemId: previous, count: 1 };
+  player.equipmentEnchant[def.slot] = stack.enchant ?? 0;
+  if (previous) player.inventory[index] = previousEnchant > 0 ? { itemId: previous, count: 1, enchant: previousEnchant } : { itemId: previous, count: 1 };
   else player.inventory.splice(index, 1);
   player.revision += 1;
 }
@@ -229,8 +253,10 @@ export function unequip(world: World, slot: EquipSlot): void {
     world.events.push({ type: 'inventoryFull' });
     return;
   }
+  const enchant = player.equipmentEnchant[slot];
   player.equipment[slot] = null;
-  player.inventory.push({ itemId, count: 1 });
+  player.equipmentEnchant[slot] = 0;
+  player.inventory.push(enchant > 0 ? { itemId, count: 1, enchant } : { itemId, count: 1 });
   player.revision += 1;
 }
 
@@ -241,5 +267,5 @@ export function dropFromInventory(world: World, index: number): void {
   if (!stack) return;
   player.inventory.splice(index, 1);
   player.revision += 1;
-  dropLoot(world, stack.itemId, stack.count, player.pos, true);
+  dropLoot(world, stack.itemId, stack.count, player.pos, true, stack.enchant ?? 0);
 }

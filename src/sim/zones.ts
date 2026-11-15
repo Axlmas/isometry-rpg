@@ -3,6 +3,7 @@ import {
   type MonsterKind, PILLAR_CHANCE, WORLD_HEIGHT, WORLD_TREE_CHANCE, WORLD_WIDTH,
 } from './balance';
 import { type GridMap, type Point, type Tile, TILE_FLOOR, TILE_WALL, isWalkable } from './grid';
+import type { NpcKind } from './npcs';
 import type { Rng } from './rng';
 
 /**
@@ -54,28 +55,31 @@ export interface ZoneLayout {
   map: GridMap;
   /** Where a hero appears when not arriving through an exit. */
   spawn: Point;
-  merchant: Point | null;
+  npcs: Array<{ kind: NpcKind; pos: Point }>;
   exits: ZoneExit[];
   monsters: MonsterSpot[];
 }
 
-// The village is drawn by hand: # is a wall (palisade or house), M the
-// merchant, S the place a new hero appears. The gap in the east wall is the gate.
+// The village is drawn by hand: # is a wall (palisade or house), S the place
+// a new hero appears, and the letters are its people: A the alchemist, O the
+// outfitter, B the blacksmith, T the trainer, G a guard. The gap in the east
+// wall is the gate.
 const VILLAGE = [
   '######################',
   '#....................#',
   '#..###....##....###..#',
   '#..###....##....###..#',
-  '#....................#',
-  '#....M...............#',
+  '#...A......T.....B...#',
+  '#...................G#',
   '#.........S...........',
   '#.....................',
-  '#....................#',
+  '#...................G#',
   '#..###....##....###..#',
   '#..###....##....###..#',
-  '#....................#',
+  '#...O................#',
   '######################',
 ];
+const VILLAGE_PEOPLE: Readonly<Record<string, NpcKind>> = { A: 'alchemist', O: 'outfitter', B: 'blacksmith', T: 'trainer', G: 'guard' };
 const VILLAGE_WIDTH = (VILLAGE[0] as string).length;
 /** Top-left corner of the village on the world map. */
 const VILLAGE_ORIGIN: Point = { x: 8, y: 23 };
@@ -151,7 +155,7 @@ function buildOverworld(rng: Rng): ZoneLayout {
   const height = WORLD_HEIGHT;
   const tiles: Tile[] = [];
   let spawn: Point = { ...VILLAGE_ORIGIN };
-  let merchant: Point | null = null;
+  const npcs: ZoneLayout['npcs'] = [];
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -159,7 +163,8 @@ function buildOverworld(rng: Rng): ZoneLayout {
         const cell = (VILLAGE[y - VILLAGE_ORIGIN.y] as string)[x - VILLAGE_ORIGIN.x];
         tiles.push(cell === '#' ? TILE_WALL : TILE_FLOOR);
         if (cell === 'S') spawn = { x, y };
-        if (cell === 'M') merchant = { x, y };
+        const person = VILLAGE_PEOPLE[cell as string];
+        if (person) npcs.push({ kind: person, pos: { x, y } });
         continue;
       }
       const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
@@ -192,7 +197,7 @@ function buildOverworld(rng: Rng): ZoneLayout {
     }
   }
 
-  return { map, spawn, merchant, exits: [{ pos: MINES_DOOR, to: 'dungeon', leadsTo: 'mines' }], monsters };
+  return { map, spawn, npcs, exits: [{ pos: MINES_DOOR, to: 'dungeon', leadsTo: 'mines' }], monsters };
 }
 
 function buildDungeon(rng: Rng): ZoneLayout {
@@ -215,7 +220,7 @@ function buildDungeon(rng: Rng): ZoneLayout {
     }
   }
   const monsters = pickSpots(candidates, MONSTER_COUNT, rng).map((home): MonsterSpot => ({ home, kind: 'grunt', level: null }));
-  return { map, spawn, merchant: null, exits: [{ pos: { x: spawn.x, y: spawn.y - 1 }, to: 'overworld', leadsTo: 'hollow' }], monsters };
+  return { map, spawn, npcs: [], exits: [{ pos: { x: spawn.x, y: spawn.y - 1 }, to: 'overworld', leadsTo: 'hollow' }], monsters };
 }
 
 export function buildZone(zone: ZoneKind, rng: Rng): ZoneLayout {
