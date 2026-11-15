@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Model viewer</title>
+  <style>html,body{margin:0;height:100%;background:#9aa3a6}canvas{display:block}</style>
+</head>
+<body>
+  <!--
+    Development tool: shows models side by side under the game's light.
+    Run `npm run dev` and open /tools/models/view.html?models=oak,fir (names in public/models).
+  -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+    const names = (new URLSearchParams(location.search).get('models') || 'oak').split(',');
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#9aa3a6');
+    scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environmentIntensity = 0.45;
+    scene.add(new THREE.HemisphereLight('#c3cfdd', '#3e3628', 0.9));
+    const sun = new THREE.DirectionalLight('#fff0dc', 2.2);
+    sun.position.set(-5, 10, 4);
+    scene.add(sun);
+    const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 100);
+    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const gltfs = await Promise.all(names.map((n) => loader.loadAsync(`/models/${n}.glb`)));
+    let x = 0;
+    for (const g of gltfs) {
+      const box = new THREE.Box3().setFromObject(g.scene);
+      const size = box.getSize(new THREE.Vector3());
+      const s = 2 / size.y;
+      g.scene.scale.setScalar(s);
+      g.scene.position.set(x, -box.min.y * s, 0);
+      scene.add(g.scene);
+      x += 2.2;
+    }
+    const mid = (x - 2.2) / 2;
+    camera.position.set(mid + 3.5, 4, 6.5);
+    camera.lookAt(mid, 1, 0);
+    renderer.render(scene, camera);
+    document.body.dataset.ready = '1';
+  </script>
+</body>
+</html>
