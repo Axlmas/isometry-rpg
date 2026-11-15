@@ -6,60 +6,77 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-// Everything that is not a model: renderer, camera, light, fog, ground, post-processing.
-// These layers are pure code and can be tuned independently of the assets.
+// Renderer, camera, light, fog and post-processing. Pure code, tuned independently of
+// the models. The camera looks down the same diagonal as the old isometric view, so
+// "up" on the screen is still towards smaller x and y in the rules' coordinates.
 
-const FOG_COLOR = new THREE.Color('#9aa3a6');
-const CAMERA_ELEVATION = THREE.MathUtils.degToRad(40);
-const CAMERA_AZIMUTH = THREE.MathUtils.degToRad(45);
+export const CAMERA_AZIMUTH = THREE.MathUtils.degToRad(45);
+const CAMERA_ELEVATION = THREE.MathUtils.degToRad(42);
+
+export type Mood = 'overworld' | 'dungeon';
+
+const MOODS: Record<Mood, { fog: string; near: number; far: number; sun: number; sky: string; ground: string; hemi: number; env: number; torch: number }> = {
+  overworld: { fog: '#9aa3a6', near: 28, far: 70, sun: 2.2, sky: '#c3cfdd', ground: '#3e3628', hemi: 0.9, env: 0.45, torch: 0 },
+  dungeon: { fog: '#0d0f12', near: 10, far: 32, sun: 0.3, sky: '#6a7080', ground: '#1c1814', hemi: 0.5, env: 0.2, torch: 110 },
+};
 
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(30, 1, 0.5, 200);
-  readonly sun: THREE.DirectionalLight;
-  readonly ground: THREE.Mesh;
+  readonly camera = new THREE.PerspectiveCamera(30, 1, 0.5, 260);
+  readonly canvas: HTMLCanvasElement;
+  private readonly sun: THREE.DirectionalLight;
+  private readonly hemi: THREE.HemisphereLight;
+  /** Warm light that travels with the hero underground. */
+  private readonly torch: THREE.PointLight;
+  private readonly fog: THREE.Fog;
   private readonly composer: EffectComposer;
   private readonly bloom: UnrealBloomPass;
   private readonly focus = new THREE.Vector3();
-  distance = 15;
+  private shakeLeft = 0;
+  private shakeStrength = 0;
+  distance = 22;
 
-  constructor(container: HTMLElement) {
+  constructor(private readonly container: HTMLElement) {
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
-    // Several passes render per frame; count them all, reset once per frame in render().
-    renderer.info.autoReset = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
+    // Several passes render per frame; count them all, reset once per frame in render().
+    renderer.info.autoReset = false;
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
+    this.canvas = renderer.domElement;
+    this.canvas.style.display = 'block';
+    this.canvas.style.touchAction = 'none';
 
     const scene = this.scene;
-    scene.background = FOG_COLOR;
-    scene.fog = new THREE.Fog(FOG_COLOR, 22, 55);
+    this.fog = new THREE.Fog(MOODS.overworld.fog, 28, 70);
+    scene.fog = this.fog;
+    scene.background = new THREE.Color(MOODS.overworld.fog);
 
     // Soft image-based light so metal armour has something to reflect.
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.45;
 
-    scene.add(new THREE.HemisphereLight('#c3cfdd', '#3e3628', 0.9));
+    this.hemi = new THREE.HemisphereLight(MOODS.overworld.sky, MOODS.overworld.ground, 0.9);
+    scene.add(this.hemi);
 
     const sun = new THREE.DirectionalLight('#fff0dc', 2.2);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     const sc = sun.shadow.camera;
-    sc.left = -14; sc.right = 14; sc.top = 14; sc.bottom = -14; sc.near = 1; sc.far = 60;
+    sc.left = -18; sc.right = 18; sc.top = 18; sc.bottom = -18; sc.near = 1; sc.far = 80;
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.03;
     scene.add(sun, sun.target);
     this.sun = sun;
 
-    this.ground = makeGround();
-    scene.add(this.ground);
-    scene.add(makeRocks(), makeGrass());
+    this.torch = new THREE.PointLight('#ffb36b', 0, 22, 1.3);
+    this.torch.castShadow = false;
+    scene.add(this.torch);
 
     const target = new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType });
     const composer = new EffectComposer(renderer, target);
@@ -70,23 +87,46 @@ export class Stage {
     composer.addPass(new OutputPass());
     this.composer = composer;
 
+    this.setMood('overworld');
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
 
-  /** Keeps the camera and the shadow box centred on a point (the hero). */
+  setMood(mood: Mood): void {
+    const m = MOODS[mood];
+    this.fog.color.set(m.fog);
+    this.fog.near = m.near;
+    this.fog.far = m.far;
+    (this.scene.background as THREE.Color).set(m.fog);
+    this.sun.intensity = m.sun;
+    this.hemi.color.set(m.sky);
+    this.hemi.groundColor.set(m.ground);
+    this.hemi.intensity = m.hemi;
+    this.scene.environmentIntensity = m.env;
+    this.torch.intensity = m.torch;
+  }
+
+  /** Keeps the camera, the sun's shadow box and the torch on a point (the hero). */
   follow(point: THREE.Vector3, dt: number): void {
-    const k = 1 - Math.exp(-dt * 6);
+    const k = dt <= 0 ? 1 : 1 - Math.exp(-dt * 7);
     this.focus.lerp(point, k);
     const d = this.distance;
+    const f = this.focus;
     this.camera.position.set(
-      this.focus.x + Math.sin(CAMERA_AZIMUTH) * Math.cos(CAMERA_ELEVATION) * d,
-      this.focus.y + Math.sin(CAMERA_ELEVATION) * d,
-      this.focus.z + Math.cos(CAMERA_AZIMUTH) * Math.cos(CAMERA_ELEVATION) * d,
+      f.x + Math.sin(CAMERA_AZIMUTH) * Math.cos(CAMERA_ELEVATION) * d,
+      f.y + Math.sin(CAMERA_ELEVATION) * d,
+      f.z + Math.cos(CAMERA_AZIMUTH) * Math.cos(CAMERA_ELEVATION) * d,
     );
-    this.camera.lookAt(this.focus.x, this.focus.y + 0.9, this.focus.z);
-    this.sun.position.set(this.focus.x - 9, this.focus.y + 16, this.focus.z + 7);
-    this.sun.target.position.copy(this.focus);
+    if (this.shakeLeft > 0) {
+      this.shakeLeft = Math.max(0, this.shakeLeft - dt);
+      const s = this.shakeStrength * (this.shakeLeft > 0 ? 1 : 0);
+      this.camera.position.x += (Math.random() - 0.5) * s; // cosmetic only
+      this.camera.position.y += (Math.random() - 0.5) * s;
+    }
+    this.camera.lookAt(f.x, f.y + 0.9, f.z);
+    this.sun.position.set(f.x - 12, f.y + 22, f.z + 9);
+    this.sun.target.position.copy(f);
+    this.torch.position.set(point.x, point.y + 2.4, point.z);
   }
 
   snapTo(point: THREE.Vector3): void {
@@ -94,15 +134,40 @@ export class Stage {
     this.follow(point, 0);
   }
 
+  shake(seconds: number, strength: number): void {
+    this.shakeLeft = Math.max(this.shakeLeft, seconds);
+    this.shakeStrength = strength;
+  }
+
   render(): void {
     this.renderer.info.reset();
     this.composer.render();
   }
 
+  /** Screen pixel position of a point in the world, or null when it is behind the camera. */
+  project(point: THREE.Vector3, out: { x: number; y: number }): boolean {
+    const v = point.clone().project(this.camera);
+    if (v.z > 1) return false;
+    const rect = this.canvas.getBoundingClientRect();
+    out.x = rect.left + (v.x * 0.5 + 0.5) * rect.width;
+    out.y = rect.top + (-v.y * 0.5 + 0.5) * rect.height;
+    return true;
+  }
+
+  /** The ray from the camera through a screen pixel. */
+  rayAt(clientX: number, clientY: number, ray = new THREE.Raycaster()): THREE.Raycaster {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    ray.setFromCamera(ndc, this.camera);
+    return ray;
+  }
+
   private resize(): void {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
     this.composer.setSize(w, h);
     this.bloom.resolution.set(w / 2, h / 2);
     this.camera.aspect = w / h;
@@ -110,7 +175,7 @@ export class Stage {
   }
 }
 
-/** Slight warm grade, a touch of contrast and a vignette — the "old MMO" mood. */
+/** A slight warm grade and muted colours — the old-MMO mood. The vignette is a HUD layer. */
 const GradeShader = {
   uniforms: { tDiffuse: { value: null } },
   vertexShader: /* glsl */ `
@@ -123,135 +188,8 @@ const GradeShader = {
       vec4 c = texture2D(tDiffuse, vUv);
       vec3 col = c.rgb;
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-      col = mix(vec3(l), col, 0.9);               // slightly muted colours
-      col *= vec3(1.02, 1.0, 0.97);               // slightly warm
-      vec2 d = vUv - 0.5;
-      col *= 1.0 - smoothstep(0.35, 0.85, length(d * vec2(1.3, 1.0))) * 0.55; // vignette
+      col = mix(vec3(l), col, 0.9);
+      col *= vec3(1.02, 1.0, 0.97);
       gl_FragColor = vec4(col, c.a);
     }`,
 };
-
-function makeGround(): THREE.Mesh {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#4f5a32';
-  ctx.fillRect(0, 0, size, size);
-  const rnd = mulberry32(7);
-  // Layers of soft blotches: dry grass, darker grass, bare earth.
-  const blotch = (count: number, rMin: number, rMax: number, colors: string[], alpha: number) => {
-    for (let i = 0; i < count; i++) {
-      const x = rnd() * size, y = rnd() * size, r = rMin + rnd() * (rMax - rMin);
-      const color = colors[Math.floor(rnd() * colors.length)]!;
-      for (const [ox, oy] of [[0, 0], [size, 0], [-size, 0], [0, size], [0, -size]] as const) {
-        const g = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
-        g.addColorStop(0, color);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(x + ox, y + oy, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  };
-  blotch(70, 50, 140, ['#58653a', '#4a552e', '#626339'], 0.3);
-  blotch(14, 25, 60, ['#6b5a3e', '#5e4f37'], 0.35);
-  blotch(4000, 1, 2.5, ['#6f7a48', '#3d4624', '#5f5a3e'], 0.25);
-  ctx.globalAlpha = 1;
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(14, 14);
-  tex.anisotropy = 8;
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(160, 160),
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 1, metalness: 0 }),
-  );
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-/** Small smooth pebbles scattered on the ground; the large rocks are generated models. */
-function makeRocks(): THREE.InstancedMesh {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  const rnd = mulberry32(11);
-  for (let v = 0; v < pos.count; v++) {
-    const s = 0.85 + rnd() * 0.3;
-    pos.setXYZ(v, pos.getX(v) * s, pos.getY(v) * s * 0.55, pos.getZ(v) * s);
-  }
-  geo.computeVertexNormals();
-  const count = 160;
-  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: '#6c675d', roughness: 0.9 }), count);
-  const m = new THREE.Matrix4();
-  const color = new THREE.Color();
-  for (let i = 0; i < count; i++) {
-    const angle = rnd() * Math.PI * 2;
-    const dist = 2 + rnd() * 38;
-    const s = 0.05 + rnd() * rnd() * 0.22;
-    m.compose(
-      new THREE.Vector3(Math.cos(angle) * dist, s * 0.15, Math.sin(angle) * dist),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rnd() * Math.PI, 0)),
-      new THREE.Vector3(s, s, s * (0.7 + rnd() * 0.6)),
-    );
-    mesh.setMatrixAt(i, m);
-    mesh.setColorAt(i, color.setHSL(0.09, 0.08, 0.3 + rnd() * 0.15));
-  }
-  mesh.castShadow = mesh.receiveShadow = true;
-  return mesh;
-}
-
-/** Tens of thousands of grass tufts in one draw call. */
-function makeGrass(): THREE.InstancedMesh {
-  // One tuft: five thin blades fanned out, leaning slightly.
-  const verts: number[] = [];
-  for (let b = 0; b < 5; b++) {
-    const a = (b / 5) * Math.PI * 2;
-    const dx = Math.cos(a), dz = Math.sin(a);
-    const w = 0.012;
-    const h = 0.16 + (b % 3) * 0.05;
-    const lean = 0.05 + (b % 2) * 0.04;
-    verts.push(-dz * w, 0, dx * w, dz * w, 0, -dx * w, dx * lean, h, dz * lean);
-  }
-  const tuft = new THREE.BufferGeometry();
-  tuft.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-  tuft.computeVertexNormals();
-  // Normals pointing up light the blades like the ground below them, so they blend in.
-  const normals = tuft.attributes.normal as THREE.BufferAttribute;
-  for (let i = 0; i < normals.count; i++) normals.setXYZ(i, 0, 1, 0);
-  // Base colour on the material; per-tuft colours only vary its brightness and hue a little.
-  const material = new THREE.MeshStandardMaterial({ color: '#56632f', roughness: 1, side: THREE.DoubleSide });
-  const count = 26000;
-  const mesh = new THREE.InstancedMesh(tuft, material, count);
-  const rnd = mulberry32(5);
-  const m = new THREE.Matrix4();
-  const color = new THREE.Color();
-  for (let i = 0; i < count; i++) {
-    const r = Math.sqrt(rnd()) * 38;
-    const a = rnd() * Math.PI * 2;
-    const s = 0.6 + rnd() * 0.9;
-    m.compose(
-      new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.3, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.3)),
-      new THREE.Vector3(s, s * (0.7 + rnd() * 0.6), s),
-    );
-    mesh.setMatrixAt(i, m);
-    mesh.setColorAt(i, color.setHSL(0.13 + rnd() * 0.1, 0.25, 0.65 + rnd() * 0.35));
-  }
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}

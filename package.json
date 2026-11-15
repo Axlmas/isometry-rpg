@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "intl-messageformat": "^12.1.5",
-    "phaser": "^3.90.0",
     "three": "^0.187.0"
   },
   "devDependencies": {

@@ -1,4 +1,3 @@
-import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import {
   type ClassId, type GameEvent, type ItemId, type RaceId, type Region, type World, type ZoneKind, MASTERY_DAMAGE, streakBonus, MAX_LEVEL, RECIPES, SKILLS,
@@ -6,7 +5,6 @@ import {
 } from '../sim';
 import { CreationScreen } from './creation';
 import { DevPanel } from './devPanel';
-import { DungeonScene, RENDER_SCALE } from './DungeonScene';
 import { ForgePanel } from './forgePanel';
 import { Hud } from './hud';
 import { HunterPanel } from './hunterPanel';
@@ -18,6 +16,7 @@ import { ShopPanel } from './shopPanel';
 import { Hotbar } from './hotbar';
 import { Minimap } from './minimap';
 import { MONSTER_NAME } from './npcText';
+import { WorldScene } from './three/WorldScene';
 import { setSoundEnabled, soundEnabled, unlockSound } from './sound';
 import { QUALITY_NAME } from './itemText';
 import { TrainerPanel } from './trainerPanel';
@@ -261,7 +260,7 @@ function showNotice(event: GameEvent): void {
   }
 }
 
-const scene = new DungeonScene(world, {
+const scene = new WorldScene(document.getElementById('game') as HTMLElement, world, {
   onStats: showStats,
   onCheckpoint: persist,
   onDeath: (w, xpLost) => {
@@ -302,6 +301,7 @@ const scene = new DungeonScene(world, {
   onNotice: showNotice,
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
+  npcName: (kind) => i18n.t(NPC_NAME[kind]),
 });
 
 const hotbar = new Hotbar(i18n, (slot) => scene.useSkillSlot(slot, false), (command) => scene.send(command));
@@ -364,21 +364,6 @@ function onFatalError(error: unknown): void {
 }
 window.addEventListener('error', (event) => onFatalError(event.error ?? event.message));
 window.addEventListener('unhandledrejection', (event) => onFatalError(event.reason));
-
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: 'game',
-  backgroundColor: '#12141a',
-  // The canvas has RENDER_SCALE times more pixels than the window and is shown scaled down,
-  // so the picture is sharp on screens with a high pixel density.
-  scale: { mode: Phaser.Scale.NONE, width: window.innerWidth * RENDER_SCALE, height: window.innerHeight * RENDER_SCALE, zoom: 1 / RENDER_SCALE },
-  // Keeps the browser's own context menu and page scroll out of the way.
-  disableContextMenu: true,
-  banner: false,
-  scene,
-});
-
-window.addEventListener('resize', () => game.scale.resize(window.innerWidth * RENDER_SCALE, window.innerHeight * RENDER_SCALE));
 
 // The sound switch: its label says what it will do, in the player's language.
 const soundButton = document.getElementById('sound') as HTMLButtonElement;

@@ -6,7 +6,7 @@
   "hud.monsters": "{count} is the number of living monsters in the dungeon. The =0 form is a short victory message.",
   "death.title": "Heading of the defeat screen. Solemn, not jokey.",
   "death.respawn": "Button that brings the hero back to life at the dungeon entrance.",
-  "hud.hint": "Controls summary. WASD, I and Space are physical keys and stay as they are in every language.",
+  "hud.hint": "Controls summary. WASD, I, T, F, Q, E, R, Esc and Space are physical keys and stay as they are in every language.",
   "inventory.stack": "An item name followed by how many there are, for example 'Leather × 3'.",
   "inventory.better": "Short tag next to a bag item that has higher numbers than the one currently worn.",
   "grade.d": "Equipment tier. The letter D is part of the game's terminology and is not translated.",
