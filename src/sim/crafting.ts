@@ -7,7 +7,7 @@ import type { World } from './world';
 /** Recipe IDs are stable: saves refer to them. */
 export type RecipeId =
   | 'steelIngot' | 'tannedLeather' | 'cord' | 'chargeD'
-  | 'soldierBlade' | 'ironHelm' | 'chainShirt' | 'ironGreaves';
+  | 'soldierBlade' | 'ironHelm' | 'chainShirt' | 'ironGreaves' | 'longbow' | 'runedStaff';
 
 export interface Recipe {
   id: RecipeId;
@@ -39,6 +39,8 @@ export const RECIPES: Readonly<Record<RecipeId, Recipe>> = {
   soldierBlade: recipe('soldierBlade', ['soldierBlade', 1], 70, true, ['steelIngot', 6], ['tannedLeather', 2], ['cord', 2], ['crystalD', 15]),
   ironHelm: recipe('ironHelm', ['ironHelm', 1], 70, true, ['steelIngot', 4], ['tannedLeather', 2], ['crystalD', 8]),
   chainShirt: recipe('chainShirt', ['chainShirt', 1], 70, true, ['steelIngot', 7], ['cord', 4], ['crystalD', 12]),
+  longbow: recipe('longbow', ['longbow', 1], 70, true, ['steelIngot', 2], ['tannedLeather', 2], ['cord', 6], ['crystalD', 18]),
+  runedStaff: recipe('runedStaff', ['runedStaff', 1], 70, true, ['steelIngot', 3], ['tannedLeather', 1], ['cord', 3], ['crystalD', 24]),
   ironGreaves: recipe('ironGreaves', ['ironGreaves', 1], 70, true, ['steelIngot', 4], ['tannedLeather', 3], ['crystalD', 8]),
 };
 export const RECIPE_IDS = Object.keys(RECIPES) as RecipeId[];

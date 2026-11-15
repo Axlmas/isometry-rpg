@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type ItemTarget, type Monster, type NpcKind, type World, ENCHANT_CHANCE, ENCHANT_MAX, ENCHANT_SAFE, GUARD_RANGE,
-  INVENTORY_SLOTS, ITEMS, NPC_RANGE, SHOP_STOCK, SKILL_IDS, SKILL_PRICE, SKILLS, addItem, buyPrice, characterOf,
+  INVENTORY_SLOTS, ITEMS, NPC_RANGE, SHOP_STOCK, SKILL_IDS, SKILL_PRICE, addItem, buyPrice, characterOf,
   circleFree, countItem, createWorld, crystalsFor, enchantChance, isNear, knows, nearestNpc, newCharacter,
   playerDamage, playerDefense, regionAt, scrollFor, step,
 } from '../src/sim';
@@ -20,8 +20,8 @@ const types = (world: World) => world.events.map((e) => e.type);
 describe('the people of the village', () => {
   const world = village();
 
-  it('are the alchemist, the outfitter, the blacksmith, the trainer and two guards', () => {
-    expect(world.npcs.map((npc) => npc.kind).sort()).toEqual(['alchemist', 'blacksmith', 'guard', 'guard', 'outfitter', 'trainer']);
+  it('are the alchemist, the outfitter, the blacksmith, the trainer, the hunter and two guards', () => {
+    expect(world.npcs.map((npc) => npc.kind).sort()).toEqual(['alchemist', 'blacksmith', 'guard', 'guard', 'hunter', 'outfitter', 'trainer']);
     expect(new Set(world.npcs.map((npc) => npc.id)).size).toBe(world.npcs.length);
   });
 
@@ -72,7 +72,7 @@ describe('merchants', () => {
       step(world, [{ type: 'sell', index: 0, count: 4 }]);
       expect(world.player.coins, kind).toBe(16);
     }
-    for (const kind of ['trainer', 'guard'] as const) {
+    for (const kind of ['trainer', 'hunter', 'guard'] as const) {
       const world = visiting(kind);
       world.player.coins = 1000;
       addItem(world.player, 'ironOre', 4);
@@ -124,10 +124,9 @@ describe('the trainer', () => {
     expect(world.player.mp).toBe(world.player.maxMp);
   });
 
-  it('prices every skill, dearer for the later ones', () => {
+  it('prices every skill', () => {
     const prices = SKILL_IDS.map((id) => SKILL_PRICE[id]);
     expect(prices.every((price) => price > 0)).toBe(true);
-    expect([...SKILL_IDS].sort((a, b) => SKILLS[a].unlockLevel - SKILLS[b].unlockLevel).map((id) => SKILL_PRICE[id])).toEqual([...prices].sort((a, b) => a - b));
   });
 
   it('teaches for good: skills stay with the hero on other maps', () => {

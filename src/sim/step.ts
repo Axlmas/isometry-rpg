@@ -5,8 +5,11 @@ import {
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
-import { dropFromInventory, equipFromInventory, pickUpLoot, spendCharge, toggleCharges, unequip, useItem } from './inventory';
+import { dropFromInventory, equipFromInventory, pickUpLoot, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
+import { fire, updateProjectiles } from './projectiles';
+import { CLASSES, RACES } from './classes';
 import { craft } from './crafting';
+import { runDevAction } from './dev';
 import { crystallize, enchant } from './enchant';
 import { buy, learn, sell } from './npcs';
 import { travel } from './travel';
@@ -92,6 +95,8 @@ function applyCommand(world: World, command: Command): void {
       player.facing = dir;
       player.attackCooldown = PLAYER_ATTACK_COOLDOWN;
       const charged = spendCharge(world);
+      // A bow or a staff looses a missile; a sword, or a bare fist, swings.
+      const ranged = weaponInHand(player) === 'bow' || weaponInHand(player) === 'staff';
       player.pendingAttack = {
         dir,
         ticks: PLAYER_ATTACK_WINDUP,
@@ -99,8 +104,9 @@ function applyCommand(world: World, command: Command): void {
         range: PLAYER_ATTACK_RANGE,
         multiplier: charged ? CHARGE_DAMAGE_MULTIPLIER : 1,
         charged,
+        shot: ranged ? { count: 1, spread: 0, pierce: false, splash: 0 } : null,
       };
-      world.events.push({ type: 'playerSwing', dir, charged });
+      world.events.push(ranged ? { type: 'playerShot', dir, charged } : { type: 'playerSwing', dir, charged });
       return;
     }
     case 'skill':
@@ -130,6 +136,9 @@ function applyCommand(world: World, command: Command): void {
     case 'travel':
       travel(world);
       return;
+    case 'dev':
+      runDevAction(world, command);
+      return;
     case 'learn':
       learn(world, command.id);
       return;
@@ -148,7 +157,8 @@ function applyCommand(world: World, command: Command): void {
 function movePlayer(world: World): void {
   const { player, map } = world;
   const before = { ...player.pos };
-  let remaining = (PLAYER_SPEED * TICK_MS) / 1000;
+  const haste = player.hasteTicks > 0 ? player.hasteFactor : 1;
+  let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * TICK_MS) / 1000;
 
   if (player.moveDir.x !== 0 || player.moveDir.y !== 0) {
     player.pos = pushOutOfWalls(
@@ -197,6 +207,7 @@ export function step(world: World, commands: readonly Command[] = []): void {
 
     if (player.attackCooldown > 0) player.attackCooldown -= 1;
     if (player.potionCooldown > 0) player.potionCooldown -= 1;
+    if (player.hasteTicks > 0) player.hasteTicks -= 1;
     for (const id of SKILL_IDS) {
       if (player.skillCooldowns[id] > 0) player.skillCooldowns[id] -= 1;
     }
@@ -206,11 +217,19 @@ export function step(world: World, commands: readonly Command[] = []): void {
       if (player.pendingAttack.ticks <= 0) {
         const attack = player.pendingAttack;
         player.pendingAttack = null;
-        resolvePlayerAttack(world, attack);
+        if (attack.shot) {
+          // A skill may ask for a shot while the hero holds nothing: the class's own weapon decides how it flies.
+          const held = weaponInHand(player);
+          const weapon = held === 'bow' || held === 'staff' ? held : CLASSES[player.cls].weapon;
+          if (weapon !== 'sword') fire(world, weapon, attack);
+        } else {
+          resolvePlayerAttack(world, attack);
+        }
       }
     }
   }
 
+  updateProjectiles(world);
   updateMonsters(world);
   if (player.hp > 0) pickUpLoot(world);
 

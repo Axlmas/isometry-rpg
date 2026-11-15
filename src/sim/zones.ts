@@ -62,7 +62,7 @@ export interface ZoneLayout {
 
 // The village is drawn by hand: # is a wall (palisade or house), S the place
 // a new hero appears, and the letters are its people: A the alchemist, O the
-// outfitter, B the blacksmith, T the trainer, G a guard. The gap in the east
+// outfitter, B the blacksmith, T the trainer, H the hunter, G a guard. The gap in the east
 // wall is the gate.
 const VILLAGE = [
   '######################',
@@ -76,10 +76,10 @@ const VILLAGE = [
   '#...................G#',
   '#..###....##....###..#',
   '#..###....##....###..#',
-  '#...O................#',
+  '#...O...........H....#',
   '######################',
 ];
-const VILLAGE_PEOPLE: Readonly<Record<string, NpcKind>> = { A: 'alchemist', O: 'outfitter', B: 'blacksmith', T: 'trainer', G: 'guard' };
+const VILLAGE_PEOPLE: Readonly<Record<string, NpcKind>> = { A: 'alchemist', O: 'outfitter', B: 'blacksmith', T: 'trainer', H: 'hunter', G: 'guard' };
 const VILLAGE_WIDTH = (VILLAGE[0] as string).length;
 /** Top-left corner of the village on the world map. */
 const VILLAGE_ORIGIN: Point = { x: 8, y: 23 };

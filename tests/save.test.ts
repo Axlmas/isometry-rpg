@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type KeyValueStore, SAVE_VERSION, loadLocale, loadWorld, parseSave, saveLocale, saveWorld, serializeWorld } from '../src/client/save';
-import { createWorld, newCharacter, step } from '../src/sim';
+import { createWorld, newCharacter, newHero, step } from '../src/sim';
 
 function memoryStore(): KeyValueStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -114,76 +114,6 @@ describe('save', () => {
     }
   });
 
-  it('moves heroes saved in the old separate village or field into the open-world village', () => {
-    const v7 = { ...(JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>), version: 7 };
-    for (const zone of ['village', 'field']) {
-      const loaded = parseSave(JSON.stringify({ ...v7, zone, x: 3, y: 17, dead: [1, 2], loot: [{ id: 'coal', count: 1, x: 5, y: 17 }] }));
-      expect(loaded.status, zone).toBe('ok');
-      if (loaded.status !== 'ok') continue;
-      const fresh = createWorld(1, undefined, undefined, 'overworld');
-      expect(loaded.world.zone).toBe('overworld');
-      expect(loaded.world.player.pos).toEqual(fresh.spawn);
-      expect(loaded.world.loot).toEqual([]);
-    }
-    const kept = parseSave(JSON.stringify({ ...v7, zone: 'dungeon' }));
-    expect(kept.status === 'ok' && kept.world.zone).toBe('dungeon');
-  });
-
-  it('remembers learned skills and tempering levels, worn, carried and on the floor', () => {
-    const world = createWorld(31337, { ...newCharacter('trainingSword'), level: 5, skills: ['heavyBlow', 'sweep'] });
-    world.player.equipmentEnchant.weapon = 4;
-    world.player.inventory = [{ itemId: 'ironHelm', count: 1, enchant: 2 }, { itemId: 'scrollArmorD', count: 3 }, { itemId: 'crystalD', count: 250 }];
-    world.loot = [{ id: 0, itemId: 'leatherCap', count: 1, enchant: 7, pos: { ...world.spawn }, ignored: false }];
-    const loaded = parseSave(serializeWorld(world));
-    expect(loaded.status).toBe('ok');
-    if (loaded.status !== 'ok') return;
-    expect(loaded.world.player.skills).toEqual(['heavyBlow', 'sweep']);
-    expect(loaded.world.player.equipmentEnchant).toEqual({ weapon: 4, helmet: 0, armor: 0, boots: 0 });
-    expect(loaded.world.player.inventory).toEqual(world.player.inventory);
-    expect(loaded.world.loot).toEqual(world.loot);
-  });
-
-  it('remembers learned recipes and rejects impossible ones', () => {
-    const world = createWorld(31337, { ...newCharacter('trainingSword'), recipes: ['ironHelm', 'chainShirt'] });
-    world.player.inventory = [{ itemId: 'recipeSoldierBlade', count: 2 }, { itemId: 'steelIngot', count: 40 }];
-    const loaded = parseSave(serializeWorld(world));
-    expect(loaded.status === 'ok' && loaded.world.player.recipes).toEqual(['ironHelm', 'chainShirt']);
-    expect(loaded.status === 'ok' && loaded.world.player.inventory).toEqual(world.player.inventory);
-    const good = JSON.parse(serializeWorld(world)) as Record<string, unknown>;
-    for (const recipes of [['steelIngot'], ['ironHelm', 'ironHelm'], ['nope'], 'all', undefined]) {
-      expect(parseSave(JSON.stringify({ ...good, recipes })).status, JSON.stringify(recipes)).toBe('damaged');
-    }
-    const v9 = parseSave(JSON.stringify({ ...good, version: 9, recipes: undefined }));
-    expect(v9.status === 'ok' && v9.world.player.recipes).toEqual([]);
-  });
-
-  it('rejects saves with impossible skills or tempering', () => {
-    const good = JSON.parse(serializeWorld(createWorld(1, { ...newCharacter('trainingSword'), level: 5 }))) as Record<string, unknown>;
-    const zero = { weapon: 0, helmet: 0, armor: 0, boots: 0 };
-    const cases: Array<Record<string, unknown>> = [
-      { skills: ['secondWind'] }, // opens at level 6, the hero is level 5
-      { skills: ['heavyBlow', 'heavyBlow'] }, { skills: ['fireball'] }, { skills: 'all' }, { skills: undefined },
-      { enchants: { ...zero, weapon: 11 } }, { enchants: { ...zero, weapon: -1 } }, { enchants: { ...zero, weapon: 1.5 } },
-      { enchants: { ...zero, helmet: 3 } }, // nothing is worn on the head
-      { enchants: { weapon: 0 } }, { enchants: { ...zero, cloak: 1 } }, { enchants: null },
-      { inventory: [{ id: 'coal', count: 3, enchant: 1 }] }, // only equipment can be tempered
-      { inventory: [{ id: 'ironSword', count: 1, enchant: 11 }] }, { inventory: [{ id: 'ironSword', count: 1, enchant: 0 }] },
-      { inventory: [{ id: 'ironSword', count: 1, enchant: '3' }] },
-    ];
-    for (const change of cases) expect(parseSave(JSON.stringify({ ...good, ...change })).status, JSON.stringify(change)).toBe('damaged');
-    expect(parseSave(JSON.stringify({ ...good, skills: ['sweep', 'heavyBlow'], enchants: { ...zero, weapon: 10 } })).status).toBe('ok');
-  });
-
-  it('lets heroes from before the trainer keep the skills they could already use', () => {
-    const v8 = { ...(JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>), version: 8, skills: undefined, enchants: undefined };
-    const at = (level: number) => parseSave(JSON.stringify({ ...v8, level, hp: 100, mp: 40 }));
-    const novice = at(1);
-    expect(novice.status === 'ok' && novice.world.player.skills).toEqual([]);
-    const veteran = at(6);
-    expect(veteran.status === 'ok' && veteran.world.player.skills).toEqual(['heavyBlow', 'sweep', 'secondWind']);
-    expect(veteran.status === 'ok' && veteran.world.player.equipmentEnchant).toEqual({ weapon: 0, helmet: 0, armor: 0, boots: 0 });
-  });
-
   it('rejects saves with impossible progress', () => {
     const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
     const cases: Array<Record<string, unknown>> = [
@@ -242,6 +172,8 @@ describe('save', () => {
       'null',
       '[]',
       JSON.stringify({ ...good, version: SAVE_VERSION + 1 }),
+      JSON.stringify({ ...good, version: 0 }),
+      JSON.stringify({ ...good, version: 'new' }),
       JSON.stringify({ ...good, seed: 'abc' }),
       JSON.stringify({ ...good, x: 0, y: 0 }), // inside a wall
       JSON.stringify({ ...good, x: 1e9 }),
@@ -250,7 +182,6 @@ describe('save', () => {
       JSON.stringify({ ...good, y: '3' }),
       JSON.stringify({ ...good, distance: -5 }),
       JSON.stringify({ ...good, distance: 1e999 }),
-      JSON.stringify({ ...good, version: 1 }), // v1 needs tilesWalked
       JSON.stringify({ ...good, hp: 101 }),
       JSON.stringify({ ...good, hp: -1 }),
       JSON.stringify({ ...good, hp: 50.5 }),
@@ -265,33 +196,29 @@ describe('save', () => {
     for (const raw of cases) expect(parseSave(raw).status, raw).toBe('damaged');
   });
 
-  it('upgrades saves from earlier versions to a fresh start in the same dungeon', () => {
-    const fresh = createWorld(1);
-    for (const old of [
-      { version: 1, seed: 1, x: 9, y: 9, tilesWalked: 12 },
-      { version: 2, seed: 1, x: 9.4, y: 8.1, distance: 12 },
-      { version: 3, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null },
-      { version: 4, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
-        equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [] },
-      { version: 5, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
-        equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [], level: 1, xp: 0, mp: null, dungeonLevel: 1 },
-      { version: 6, seed: 1, x: null, y: null, distance: 12, hp: 100, dead: [], rngState: null, coins: 0, inventory: [],
-        equipment: { weapon: 'trainingSword', helmet: null, armor: null, boots: null }, loot: [], level: 1, xp: 0, mp: null, dungeonLevel: 1, chargesOn: false },
-    ]) {
-      const loaded = parseSave(JSON.stringify(old));
-      expect(loaded.status).toBe('ok');
-      if (loaded.status !== 'ok') continue;
-      expect(loaded.world.player.distance).toBe(12);
-      expect(loaded.world.player.pos).toEqual(fresh.spawn);
-      expect(loaded.world.player.hp).toBe(fresh.player.maxHp);
-      expect(loaded.world.monsters).toEqual(fresh.monsters);
-      expect(loaded.world.player.equipment).toEqual(fresh.player.equipment);
-      expect(loaded.world.player.inventory).toEqual([]);
-      expect(loaded.world.player).toMatchObject({ level: 1, xp: 0, mp: fresh.player.maxMp });
-      expect(loaded.world.dungeonLevel).toBe(1);
-      expect(loaded.world.player.chargesOn).toBe(false);
-      expect(loaded.world.zone).toBe('dungeon');
+  it('asks for a new hero when the save is from an earlier version of the game', () => {
+    const good = JSON.parse(serializeWorld(createWorld(1))) as Record<string, unknown>;
+    for (let version = 1; version < SAVE_VERSION; version++) {
+      expect(parseSave(JSON.stringify({ ...good, version })).status, `version ${version}`).toBe('outdated');
     }
+    expect(parseSave(JSON.stringify({ version: 3, seed: 1 })).status).toBe('outdated');
+  });
+
+  it('remembers race and class, and rejects impossible ones', () => {
+    const world = createWorld(31337, newHero('elf', 'mage'));
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status === 'ok' && loaded.world.player).toMatchObject({ race: 'elf', cls: 'mage', maxHp: world.player.maxHp, maxMp: world.player.maxMp });
+    const good = JSON.parse(serializeWorld(world)) as Record<string, unknown>;
+    const sword = { weapon: 'ironSword', helmet: null, armor: null, boots: null };
+    for (const change of [{ race: 'orc' }, { cls: 'paladin' }, { race: undefined }, { cls: null }, { equipment: sword }, { skills: ['heavyBlow'], level: 5, hp: 100 }]) {
+      expect(parseSave(JSON.stringify({ ...good, ...change })).status, JSON.stringify(change)).toBe('damaged');
+    }
+  });
+
+  it('opens a saved game with the testing shortcuts only when asked to', () => {
+    const raw = serializeWorld(createWorld(1));
+    expect((parseSave(raw) as { world: { dev: boolean } }).world.dev).toBe(false);
+    expect((parseSave(raw, true) as { world: { dev: boolean } }).world.dev).toBe(true);
   });
 
   it('survives storage that throws', () => {

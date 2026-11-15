@@ -2,10 +2,13 @@ import { MAX_LEVEL, type MonsterKind, WORLD_SEED } from './balance';
 import type { GridMap, Point } from './grid';
 import { type Character, type ItemStack, newCharacter } from './inventory';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
+import type { ClassId, RaceId } from './classes';
 import type { RecipeId } from './crafting';
+import type { DevAction } from './dev';
 import type { ItemTarget } from './enchant';
 import type { Npc, NpcKind } from './npcs';
-import { maxHpAtLevel, maxMpAtLevel, monsterMaxHp } from './progression';
+import type { Projectile } from './projectiles';
+import { heroMaxHp, heroMaxMp, monsterMaxHp } from './progression';
 import { createRng } from './rng';
 import type { SkillId } from './skills';
 import { type ZoneExit, type ZoneKind, buildZone } from './zones';
@@ -22,9 +25,13 @@ export interface PendingAttack {
   multiplier: number;
   /** True when a weapon charge was spent on this blow. */
   charged: boolean;
+  /** For a ranged attack: how many missiles, how wide the fan, and what they do. Null for a melee blow. */
+  shot: { count: number; spread: number; pierce: boolean; splash: number } | null;
 }
 
 export interface Player {
+  race: RaceId;
+  cls: ClassId;
   /** Position in tile units; whole numbers are tile centres. Not bound to the grid. */
   pos: Point;
   /** Direction held on the keyboard or stick: a unit vector, or zero when released. */
@@ -55,6 +62,9 @@ export interface Player {
   skills: SkillId[];
   /** Recipes the hero has learned from recipe items. */
   recipes: RecipeId[];
+  /** Ticks of quickened walking left, and how much quicker. */
+  hasteTicks: number;
+  hasteFactor: number;
   /** When on, every blow spends a weapon charge and hits harder. */
   chargesOn: boolean;
   /** Ticks until the next potion can be drunk. */
@@ -99,6 +109,8 @@ export interface Monster {
   /** Ticks until the started blow lands; zero when not attacking. */
   windup: number;
   cooldown: number;
+  /** Ticks of slowed walking left. */
+  slowTicks: number;
   /** Next tile centre on the way around walls, or null when walking straight. */
   waypoint: Point | null;
 }
@@ -109,6 +121,12 @@ export interface Monster {
  */
 export type GameEvent =
   | { type: 'playerSwing'; dir: Point; charged: boolean }
+  /** The hero loosed an arrow or a bolt (the missiles themselves are in `world.projectiles`). */
+  | { type: 'playerShot'; dir: Point; charged: boolean }
+  /** A missile hit something or reached the end of its flight. */
+  | { type: 'projectileEnded'; id: number; pos: Point; kind: 'arrow' | 'bolt' }
+  /** The hero's class cannot wield this weapon. */
+  | { type: 'equipDenied'; itemId: ItemId }
   | { type: 'monsterHit'; id: number; damage: number; pos: Point; died: boolean }
   | { type: 'monsterWindup'; id: number }
   | { type: 'playerHit'; damage: number }
@@ -126,7 +144,7 @@ export type GameEvent =
   | { type: 'tradeDenied'; reason: 'far' | 'coins' | 'full' | 'worthless' | 'notSold' }
   | { type: 'skillDenied'; id: SkillId; reason: 'locked' | 'unlearned' | 'cooldown' | 'mana' }
   | { type: 'skillLearned'; id: SkillId }
-  | { type: 'learnDenied'; id: SkillId; reason: 'far' | 'level' | 'coins' }
+  | { type: 'learnDenied'; id: SkillId; reason: 'far' | 'class' | 'level' | 'coins' }
   | { type: 'enchanted'; itemId: ItemId; level: number }
   /** The attempt failed and the item was destroyed; `level` is what it had. */
   | { type: 'enchantFailed'; itemId: ItemId; level: number; crystals: number }
@@ -168,6 +186,11 @@ export interface World {
   respawns: Array<{ ticks: number; monster: Monster }>;
   /** Level of a dungeon's monsters. Open-world monsters have the level of their region instead. */
   dungeonLevel: number;
+  /** Arrows and bolts in flight. */
+  projectiles: Projectile[];
+  nextProjectileId: number;
+  /** True in development builds: allows the `dev` command. */
+  dev: boolean;
   /** Items on the floor, ordered by id. */
   loot: GroundLoot[];
   nextLootId: number;
@@ -207,7 +230,9 @@ export type Command =
   /** Have the blacksmith make something from a recipe. */
   | { type: 'craft'; recipe: RecipeId }
   /** Leave through the exit the hero is standing at. */
-  | { type: 'travel' };
+  | { type: 'travel' }
+  /** A testing shortcut; ignored unless the world was created for development. */
+  | ({ type: 'dev' } & DevAction);
 
 /** A carried-over amount, forced into [min, max]; anything missing or not a number becomes the maximum. */
 function carried(value: number | undefined, min: number, max: number): number {
@@ -227,7 +252,10 @@ export function createWorld(
   dungeonLevel: number = character.level,
   zone: ZoneKind = 'dungeon',
   from: ZoneKind | null = null,
+  dev = false,
 ): World {
+  const race = character.race ?? 'human';
+  const cls = character.cls ?? 'warrior';
   const level = Math.min(MAX_LEVEL, Math.max(1, Math.floor(character.level)));
   const rng = createRng(seed >>> 0);
   // The open world's geography never changes; only a dungeon is shaped by the seed.
@@ -250,6 +278,7 @@ export function createWorld(
       returning: false,
       windup: 0,
       cooldown: 0,
+      slowTicks: 0,
       waypoint: null,
     };
   });
@@ -264,18 +293,22 @@ export function createWorld(
     npcs: layout.npcs.map((npc, id) => ({ id, kind: npc.kind, pos: npc.pos, cooldown: 0 })),
     exits: layout.exits,
     player: {
+      race,
+      cls,
       pos: { ...arrival },
       moveDir: { x: 0, y: 0 },
       path: [],
       distance: 0,
       // Carried-over health is kept within sensible bounds; a hero never arrives dead.
-      hp: carried(character.hp, 1, maxHpAtLevel(level)),
-      maxHp: maxHpAtLevel(level),
+      hp: carried(character.hp, 1, heroMaxHp(level, race, cls)),
+      maxHp: heroMaxHp(level, race, cls),
       level,
       xp: character.xp,
-      mp: carried(character.mp, 0, maxMpAtLevel(level)),
-      maxMp: maxMpAtLevel(level),
-      skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0 },
+      mp: carried(character.mp, 0, heroMaxMp(level, race, cls)),
+      maxMp: heroMaxMp(level, race, cls),
+      skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0, powerShot: 0, volley: 0, swiftness: 0, fireBolt: 0, frostNova: 0, mend: 0 },
+      hasteTicks: 0,
+      hasteFactor: 1,
       skills: [...(character.skills ?? [])],
       recipes: [...(character.recipes ?? [])],
       chargesOn: false,
@@ -294,6 +327,9 @@ export function createWorld(
     monsterTotal: monsters.length,
     respawns: [],
     dungeonLevel,
+    projectiles: [],
+    nextProjectileId: 0,
+    dev,
     loot: [],
     nextLootId: 0,
     events: [],

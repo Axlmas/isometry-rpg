@@ -8,7 +8,7 @@ import { type SkillId, SKILLS, isSkillId } from './skills';
 import type { World } from './world';
 
 /** NPC kinds are stable IDs: the client maps them to names, looks and windows. */
-export type NpcKind = 'alchemist' | 'outfitter' | 'blacksmith' | 'trainer' | 'guard';
+export type NpcKind = 'alchemist' | 'outfitter' | 'blacksmith' | 'trainer' | 'hunter' | 'guard';
 
 export interface Npc {
   id: number;
@@ -21,15 +21,20 @@ export interface Npc {
 /** What each merchant sells, in the order shown. Every merchant buys anything that has a price. */
 export const SHOP_STOCK: Readonly<Partial<Record<NpcKind, readonly ItemId[]>>> = {
   alchemist: ['healthPotion', 'manaPotion', 'chargePlain', 'chargeD'],
-  outfitter: ['ironSword', 'leatherCap', 'leatherJerkin', 'leatherBoots'],
+  outfitter: ['ironSword', 'huntingBow', 'oakStaff', 'leatherCap', 'leatherJerkin', 'leatherBoots'],
   blacksmith: [
     'scrollWeaponPlain', 'scrollArmorPlain', 'scrollWeaponD', 'scrollArmorD', 'crystalD',
-    'recipeSoldierBlade', 'recipeIronHelm', 'recipeChainShirt', 'recipeIronGreaves',
+    'recipeSoldierBlade', 'recipeLongbow', 'recipeRunedStaff', 'recipeIronHelm', 'recipeChainShirt', 'recipeIronGreaves',
   ],
 };
 
 /** What the trainer asks for teaching each skill, in coins. */
-export const SKILL_PRICE: Readonly<Record<SkillId, number>> = { heavyBlow: 60, sweep: 250, secondWind: 600 };
+/** The first, second and third skill of every class cost the same. */
+export const SKILL_PRICE: Readonly<Record<SkillId, number>> = {
+  heavyBlow: 60, sweep: 250, secondWind: 600,
+  powerShot: 60, volley: 250, swiftness: 600,
+  fireBolt: 60, frostNova: 250, mend: 600,
+};
 
 /** The NPC the hero is standing next to, if any; the nearest when there are several. */
 export function nearestNpc(world: World): Npc | null {
@@ -104,8 +109,9 @@ export function knows(world: World, id: SkillId): boolean {
 export function learn(world: World, id: SkillId): void {
   const { player } = world;
   if (!isSkillId(id) || knows(world, id)) return;
-  const deny = (reason: 'far' | 'level' | 'coins') => void world.events.push({ type: 'learnDenied', id, reason });
+  const deny = (reason: 'far' | 'class' | 'level' | 'coins') => void world.events.push({ type: 'learnDenied', id, reason });
   if (!isNear(world, 'trainer')) return deny('far');
+  if (SKILLS[id].cls !== player.cls) return deny('class');
   if (player.level < SKILLS[id].unlockLevel) return deny('level');
   if (player.coins < SKILL_PRICE[id]) return deny('coins');
   player.coins -= SKILL_PRICE[id];

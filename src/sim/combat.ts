@@ -6,11 +6,7 @@ import {
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { dropLoot, playerDamage, playerDefense } from './inventory';
-import {
-  DROP_CHARGES_CHANCE, DROP_CHARGES_COUNT, DROP_COINS, DROP_D_EQUIPMENT_CHANCE, DROP_MATERIAL_CHANCE,
-  DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE, DROP_POTIONS, DROP_POTION_CHANCE, DROP_RECIPE_CHANCE, DROP_SCROLLS,
-  DROP_SCROLL_CHANCE, MATERIAL_IDS, RECIPE_ITEMS, droppableEquipment,
-} from './items';
+import { DROP_TABLES } from './items';
 import { guardDuty } from './npcs';
 import { findPath } from './pathfinding';
 import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterXp } from './progression';
@@ -30,29 +26,24 @@ function pick<T>(world: World, options: readonly T[]): T {
   return options[roll(world, [0, options.length - 1])] as T;
 }
 
-/** Rolls what a dead monster leaves behind and puts it on the floor. */
-function dropMonsterLoot(world: World, at: Point): void {
-  dropLoot(world, 'coins', roll(world, DROP_COINS), at);
-  // Placed slightly apart so both drops are visible.
-  const beside = { x: at.x + 0.35, y: at.y + 0.1 };
-  const chance = roll(world, [1, 100]);
-  // Each threshold is the upper end of one outcome's share of the roll.
-  const material = DROP_MATERIAL_CHANCE;
-  const plain = material + DROP_PLAIN_EQUIPMENT_CHANCE;
-  const dGrade = plain + DROP_D_EQUIPMENT_CHANCE;
-  const potion = dGrade + DROP_POTION_CHANCE;
-  const charges = potion + DROP_CHARGES_CHANCE;
-  if (chance <= material) dropLoot(world, pick(world, MATERIAL_IDS), roll(world, DROP_MATERIAL_COUNT), beside);
-  else if (chance <= plain) dropLoot(world, pick(world, droppableEquipment('none')), 1, beside);
-  else if (chance <= dGrade) dropLoot(world, pick(world, droppableEquipment('d')), 1, beside);
-  else if (chance <= potion) dropLoot(world, pick(world, DROP_POTIONS), 1, beside);
-  else if (chance <= charges) dropLoot(world, 'chargePlain', roll(world, DROP_CHARGES_COUNT), beside);
-  else if (chance <= charges + DROP_SCROLL_CHANCE) dropLoot(world, pick(world, DROP_SCROLLS), 1, beside);
-  else if (chance <= charges + DROP_SCROLL_CHANCE + DROP_RECIPE_CHANCE) dropLoot(world, pick(world, RECIPE_ITEMS), 1, beside);
+/** Rolls what a dead monster leaves behind, by its kind's drop table, and puts it on the floor. */
+function dropMonsterLoot(world: World, monster: Monster): void {
+  const table = DROP_TABLES[monster.kind];
+  dropLoot(world, 'coins', roll(world, table.coins), monster.pos);
+  // One roll decides which line of the table comes up, if any.
+  let chance = roll(world, [1, 100]);
+  for (const entry of table.drops) {
+    if (chance <= entry.chance) {
+      // Placed slightly apart from the coins so both drops are visible.
+      dropLoot(world, pick(world, entry.items), roll(world, entry.count), { x: monster.pos.x + 0.35, y: monster.pos.y + 0.1 });
+      return;
+    }
+    chance -= entry.chance;
+  }
 }
 
 /** Removes dead monsters. In the open world they come back after a while; a dungeon stays cleared. */
-function buryTheDead(world: World): void {
+export function buryTheDead(world: World): void {
   if (world.zone === 'overworld') {
     for (const monster of world.monsters) {
       if (monster.hp === 0) world.respawns.push({ ticks: MONSTER_RESPAWN_TIME, monster });
@@ -61,7 +52,59 @@ function buryTheDead(world: World): void {
   world.monsters = world.monsters.filter((monster) => monster.hp > 0);
 }
 
-/** Lands the hero's blow: damages every monster inside the swing. */
+/**
+ * The hero damages one monster: rolls the weapon's damage, applies the
+ * multiplier, pushes the monster along `push` and interrupts its attack.
+ * Returns the experience earned (zero unless it died). The caller removes
+ * the dead and grants the experience once all hits of the tick are done.
+ */
+export function hitMonster(world: World, monster: Monster, multiplier: number, push: Point): number {
+  const { player, map } = world;
+  const damage = Math.max(1, Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * multiplier));
+  monster.hp = Math.max(0, monster.hp - damage);
+  monster.aggro = true;
+  monster.returning = false;
+  monster.windup = 0; // A hit interrupts the monster's own attack.
+  const length = Math.hypot(push.x, push.y);
+  if (length > 0) {
+    monster.pos = pushOutOfWalls(
+      map,
+      { x: monster.pos.x + (push.x / length) * MONSTER_KNOCKBACK, y: monster.pos.y + (push.y / length) * MONSTER_KNOCKBACK },
+      MONSTER_RADIUS,
+    );
+  }
+  world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
+  if (monster.hp > 0) return 0;
+  dropMonsterLoot(world, monster);
+  return monsterXp(monster.level, monster.kind);
+}
+
+/**
+ * The hero damages every monster within `radius` of a point, unless a wall is
+ * in the way, and slows them for `slow` ticks. `except` skips one monster
+ * (the one a missile already hit). With `settle` the dead are removed and the
+ * experience granted here; without it the caller does that. Returns the
+ * experience earned.
+ */
+export function hitMonstersAround(world: World, centre: Point, radius: number, multiplier: number, slow: number, except = -1, settle = true): number {
+  let xp = 0;
+  for (const monster of world.monsters) {
+    if (monster.hp <= 0 || monster.id === except) continue;
+    const dx = monster.pos.x - centre.x;
+    const dy = monster.pos.y - centre.y;
+    if (Math.hypot(dx, dy) > radius + MONSTER_RADIUS) continue;
+    if (!clearLine(world.map, centre, monster.pos, 0.05)) continue;
+    xp += hitMonster(world, monster, multiplier, { x: dx, y: dy });
+    if (slow > 0) monster.slowTicks = slow;
+  }
+  if (settle) {
+    buryTheDead(world);
+    grantXp(world, xp);
+  }
+  return xp;
+}
+
+/** Lands the hero's melee blow: damages every monster inside the swing. */
 export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
   const { player, map } = world;
   const { dir } = attack;
@@ -79,24 +122,7 @@ export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
     }
     // No hitting through walls.
     if (!clearLine(map, player.pos, monster.pos, 0.05)) continue;
-
-    const damage = Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * attack.multiplier);
-    monster.hp = Math.max(0, monster.hp - damage);
-    monster.aggro = true;
-    monster.returning = false;
-    monster.windup = 0; // A hit interrupts the monster's own attack.
-    if (distance > 0) {
-      monster.pos = pushOutOfWalls(
-        map,
-        { x: monster.pos.x + (dx / distance) * MONSTER_KNOCKBACK, y: monster.pos.y + (dy / distance) * MONSTER_KNOCKBACK },
-        MONSTER_RADIUS,
-      );
-    }
-    world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
-    if (monster.hp === 0) {
-      dropMonsterLoot(world, monster.pos);
-      xp += monsterXp(monster.level, monster.kind);
-    }
+    xp += hitMonster(world, monster, attack.multiplier, { x: dx, y: dy });
   }
   buryTheDead(world);
   grantXp(world, xp);
@@ -145,7 +171,9 @@ function walkTowards(world: World, monster: Monster, target: Point, stopAt: numb
   const dy = aim.y - monster.pos.y;
   const toAim = Math.hypot(dx, dy);
   const reach = aim === target ? Math.max(0, toAim - stopAt) : toAim;
-  const move = Math.min((MONSTER_KINDS[monster.kind].speed * TICK_MS) / 1000, reach);
+  // A chilled monster walks at half speed.
+  const speed = MONSTER_KINDS[monster.kind].speed * (monster.slowTicks > 0 ? 0.5 : 1);
+  const move = Math.min((speed * TICK_MS) / 1000, reach);
   if (toAim === 0 || move <= 0) {
     if (aim !== target) monster.waypoint = null;
     return;
@@ -218,6 +246,7 @@ function respawnMonsters(world: World): void {
       returning: false,
       windup: 0,
       cooldown: 0,
+      slowTicks: 0,
       waypoint: null,
     });
   }
@@ -235,6 +264,7 @@ export function updateMonsters(world: World): void {
   const heroIsPrey = player.hp > 0 && !regionAt(world.zone, player.pos).safe;
   for (const monster of world.monsters) {
     if (monster.cooldown > 0) monster.cooldown -= 1;
+    if (monster.slowTicks > 0) monster.slowTicks -= 1;
 
     if (monster.returning) {
       const fromHome = Math.hypot(monster.home.x - monster.pos.x, monster.home.y - monster.pos.y);

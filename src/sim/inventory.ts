@@ -3,6 +3,7 @@ import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { ENCHANT_ARMOR_BONUS, ENCHANT_WEAPON_BONUS } from './balance';
 import { type EquipSlot, type ItemDef, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, maxStackOf } from './items';
+import { type ClassId, type RaceId, type WeaponType, CLASSES } from './classes';
 import { type RecipeId, learnRecipe } from './crafting';
 import type { SkillId } from './skills';
 import type { Player, World } from './world';
@@ -16,6 +17,9 @@ export interface ItemStack {
 
 /** Everything the hero keeps when moving on to another dungeon. */
 export interface Character {
+  /** A human warrior when left out. */
+  race?: RaceId;
+  cls?: ClassId;
   level: number;
   /** Experience gained towards the next level. */
   xp: number;
@@ -38,14 +42,19 @@ export function enchantBonus(def: Extract<ItemDef, { kind: 'equipment' }>, level
   return level * (def.slot === 'weapon' ? ENCHANT_WEAPON_BONUS[def.grade] : ENCHANT_ARMOR_BONUS);
 }
 
+/** A new hero of the given race and class, with that class's starting weapon. */
+export function newHero(race: RaceId, cls: ClassId): Character {
+  return { ...newCharacter(CLASSES[cls].startingWeapon), race, cls };
+}
+
 export function newCharacter(startingWeapon: ItemId): Character {
   return { level: 1, xp: 0, coins: 0, inventory: [], equipment: { weapon: startingWeapon, helmet: null, armor: null, boots: null } };
 }
 
 export function characterOf(world: World): Character {
-  const { level, xp, coins, inventory, equipment, equipmentEnchant, skills, recipes } = world.player;
+  const { race, cls, level, xp, coins, inventory, equipment, equipmentEnchant, skills, recipes } = world.player;
   return {
-    level, xp, coins,
+    race, cls, level, xp, coins,
     inventory: inventory.map((stack) => ({ ...stack })),
     equipment: { ...equipment },
     equipmentEnchant: { ...equipmentEnchant },
@@ -65,6 +74,13 @@ export function playerDamage(player: Player): readonly [number, number] {
   if (!def || def.kind !== 'equipment' || def.slot !== 'weapon') return UNARMED_DAMAGE;
   const bonus = enchantBonus(def, player.equipmentEnchant.weapon);
   return [def.damage[0] + bonus, def.damage[1] + bonus];
+}
+
+/** The kind of weapon in the hero's hand, or null when unarmed. */
+export function weaponInHand(player: Player): WeaponType | null {
+  const weapon = player.equipment.weapon;
+  const def = weapon ? ITEMS[weapon] : null;
+  return def && def.kind === 'equipment' && def.slot === 'weapon' ? def.weaponType : null;
 }
 
 export function playerDefense(player: Player): number {
@@ -240,6 +256,11 @@ export function equipFromInventory(world: World, index: number): void {
   if (!stack) return;
   const def = ITEMS[stack.itemId];
   if (def.kind !== 'equipment') return;
+  // A class fights with one kind of weapon only.
+  if (def.slot === 'weapon' && def.weaponType !== CLASSES[player.cls].weapon) {
+    world.events.push({ type: 'equipDenied', itemId: stack.itemId });
+    return;
+  }
   const previous = player.equipment[def.slot];
   const previousEnchant = player.equipmentEnchant[def.slot];
   player.equipment[def.slot] = stack.itemId;

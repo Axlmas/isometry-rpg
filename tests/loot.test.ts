@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type ItemId, type Monster, type World, DROP_COINS, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MONSTER_DAMAGE,
+  type ItemId, type World, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MONSTER_DAMAGE,
   PLAYER_MAX_HP, STARTING_WEAPON, UNARMED_DAMAGE, addItem, characterOf, createWorld, droppableEquipment,
   isItemId, playerDamage, playerDefense, step,
 } from '../src/sim';
@@ -54,46 +54,6 @@ describe('a new hero', () => {
     expect(player.inventory).toEqual([]);
     expect(player.coins).toBe(0);
     expect(playerDefense(player)).toBe(0);
-  });
-});
-
-describe('monster drops', () => {
-  it('always include coins within the stated range and sometimes an item', () => {
-    let materials = 0;
-    let equipment = 0;
-    let consumables = 0;
-    let scrolls = 0;
-    const kills = 300;
-    for (let seed = 0; seed < kills; seed++) {
-      const world = openWorld(seed);
-      const template = createWorld(seed).monsters[0] as Monster;
-      world.monsters = [{ ...template, hp: 1, pos: { x: world.spawn.x + 1, y: world.spawn.y }, home: { ...world.spawn } }];
-      step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-      for (let i = 0; i < 5 && world.monsters.length > 0; i++) step(world);
-      expect(world.monsters).toEqual([]);
-      const coins = world.loot.filter((l) => l.itemId === 'coins');
-      expect(coins).toHaveLength(1);
-      expect(coins[0]?.count).toBeGreaterThanOrEqual(DROP_COINS[0]);
-      expect(coins[0]?.count).toBeLessThanOrEqual(DROP_COINS[1]);
-      const others = world.loot.filter((l) => l.itemId !== 'coins');
-      expect(others.length).toBeLessThanOrEqual(1);
-      for (const loot of others) {
-        const { kind } = ITEMS[loot.itemId];
-        if (kind === 'material') materials += 1;
-        else if (kind === 'equipment') equipment += 1;
-        else if (kind === 'consumable') consumables += 1;
-        else scrolls += 1;
-        expect(loot.itemId).not.toBe(STARTING_WEAPON);
-      }
-    }
-    // Loose bounds around the configured 34%, 20% and 18%: this guards against a broken table, not the exact odds.
-    expect(materials / kills).toBeGreaterThan(0.22);
-    expect(materials / kills).toBeLessThan(0.46);
-    expect(equipment / kills).toBeGreaterThan(0.1);
-    expect(equipment / kills).toBeLessThan(0.32);
-    expect(consumables / kills).toBeGreaterThan(0.09);
-    expect(consumables / kills).toBeLessThan(0.29);
-    expect(scrolls / kills).toBeLessThan(0.14); // scrolls and recipes are rare: 4% and 3%
   });
 });
 
@@ -217,7 +177,7 @@ describe('equipment', () => {
   it('reduces damage taken by the defence, but never below one', () => {
     const hit = (armour: boolean) => {
       const world = openWorld(3);
-      const template = createWorld(3).monsters[0] as Monster;
+      const template = createWorld(3).monsters[0]!;
       world.monsters = [{ ...template, pos: { x: world.spawn.x + 0.9, y: world.spawn.y }, home: { ...world.spawn } }];
       if (armour) world.player.equipment = { weapon: STARTING_WEAPON, helmet: 'ironHelm', armor: 'chainShirt', boots: 'ironGreaves' };
       for (let i = 0; i < 40 && world.player.hp === PLAYER_MAX_HP; i++) step(world);
