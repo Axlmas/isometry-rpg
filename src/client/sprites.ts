@@ -82,7 +82,7 @@ export function drawNpcFigure(g: G, kind: NpcKind): void {
     g.fillStyle(0xd9b24a).fillCircle(-9, -22, 2);
     return;
   }
-  const hair: Record<Exclude<NpcKind, 'guard'>, number> = { alchemist: 0xb7b0a0, outfitter: 0x3a2a1c, blacksmith: 0x241a14, trainer: 0x8a8f99 };
+  const hair: Record<Exclude<NpcKind, 'guard'>, number> = { alchemist: 0xb7b0a0, outfitter: 0x3a2a1c, blacksmith: 0x241a14, trainer: 0x8a8f99, hunter: 0x7a4a22 };
   drawPerson(g, { clothes: look.clothes, hair: hair[kind] });
   if (kind === 'blacksmith') {
     // A leather apron.
@@ -162,4 +162,76 @@ export function drawBlade(g: G, charged: boolean): void {
   g.fillStyle(0xd9b24a).fillRect(2, -4.5, 2.5, 9);
   g.fillStyle(0x5a3f26).fillRect(-3, -1.5, 5, 3);
   if (charged) g.lineStyle(1, 0xffffff, 0.8).lineBetween(6, 0, 22, 0);
+}
+
+/** What the hero looks like: race, class and what they wear. */
+export interface HeroLook {
+  race: 'human' | 'elf';
+  cls: 'warrior' | 'archer' | 'mage';
+  /** Colour of the body armour, or null when none is worn. */
+  armor: number | null;
+  helmet: number | null;
+  boots: number | null;
+}
+
+const CLASS_CLOTHES: Record<HeroLook['cls'], number> = { warrior: 0x3f6fb5, archer: 0x3f7d4a, mage: 0x6a4a9c };
+
+/** The hero: clothes in the colour of the class, the ears of the race, and the armour actually worn. */
+export function drawHeroFigure(g: G, look: HeroLook): void {
+  g.clear();
+  const clothes = look.armor ?? CLASS_CLOTHES[look.cls];
+  drawPerson(g, { clothes, hair: look.race === 'elf' ? 0xd9c27a : 0x6b4a2a, ...(look.helmet !== null ? { helmet: look.helmet } : {}) });
+  g.lineStyle(1.5, OUTLINE, 1);
+  if (look.armor !== null) {
+    // Worn armour keeps a stripe of the class colour, so the class still reads at a glance.
+    g.fillStyle(CLASS_CLOTHES[look.cls]).fillRect(-8, -31, 16, 3);
+  }
+  if (look.cls === 'mage' && look.armor === null) {
+    // A robe reaches down over the legs.
+    g.fillStyle(clothes).fillPoints([{ x: -8, y: -14 }, { x: 8, y: -14 }, { x: 10, y: -2 }, { x: -10, y: -2 }], true);
+    g.fillStyle(tint(clothes, 0.68)).fillPoints([{ x: 1, y: -14 }, { x: 8, y: -14 }, { x: 10, y: -2 }, { x: 1, y: -2 }], true);
+    g.strokePoints([{ x: -8, y: -14 }, { x: -10, y: -2 }, { x: 10, y: -2 }, { x: 8, y: -14 }], false);
+  }
+  if (look.boots !== null) {
+    g.fillStyle(look.boots).fillRect(-7, -5, 6, 5).fillRect(1, -5, 6, 5);
+    g.strokeRect(-7, -5, 6, 5).strokeRect(1, -5, 6, 5);
+  }
+  if (look.race === 'elf' && look.helmet === null) {
+    // Pointed ears.
+    g.fillStyle(0xe8c39e).fillTriangle(-6, -38, -11, -43, -5.5, -34).fillTriangle(6, -38, 11, -43, 5.5, -34);
+    g.strokeTriangle(-6, -38, -11, -43, -5.5, -34).strokeTriangle(6, -38, 11, -43, 5.5, -34);
+  }
+}
+
+/**
+ * The weapon in the hero's hand, lying along +x from the hand at (0, 0); it
+ * is rotated to point where the hero faces. `kind` is null for bare hands.
+ */
+export function drawWeapon(g: G, kind: 'sword' | 'bow' | 'staff' | null, color: number, charged: boolean): void {
+  g.clear();
+  if (kind === null) return;
+  if (kind === 'sword') {
+    drawBlade(g, charged);
+    if (!charged) {
+      // The blade takes the colour of the item (wood, iron, graded steel).
+      g.fillStyle(color).fillPoints([{ x: 4, y: -2.2 }, { x: 22, y: -1.6 }, { x: 26, y: 0 }, { x: 22, y: 1.6 }, { x: 4, y: 2.2 }], true);
+      g.lineStyle(1.5, OUTLINE, 1).strokePoints([{ x: 4, y: -2.2 }, { x: 22, y: -1.6 }, { x: 26, y: 0 }, { x: 22, y: 1.6 }, { x: 4, y: 2.2 }], true, true);
+    }
+    return;
+  }
+  if (kind === 'bow') {
+    // Held upright in front of the hand: an arc with a string, and an arrow on it.
+    g.lineStyle(4.5, OUTLINE, 1).beginPath().arc(2, 0, 13, -Math.PI / 2.4, Math.PI / 2.4, false).strokePath();
+    g.lineStyle(2.5, color, 1).beginPath().arc(2, 0, 13, -Math.PI / 2.4, Math.PI / 2.4, false).strokePath();
+    g.lineStyle(1, 0xe8dcc0, 1).lineBetween(5.4, -12.5, 5.4, 12.5);
+    g.lineStyle(1.5, charged ? 0x9ff0ff : 0xe8d9b0, 1).lineBetween(5, 0, 22, 0);
+    g.fillStyle(charged ? 0x9ff0ff : 0xcfd3dc).fillTriangle(22, -2.5, 22, 2.5, 27, 0);
+    return;
+  }
+  // A staff with an orb at the far end.
+  g.lineStyle(4.5, OUTLINE, 1).lineBetween(-10, 0, 20, 0);
+  g.lineStyle(2.5, 0x6e4a24, 1).lineBetween(-10, 0, 20, 0);
+  g.fillStyle(OUTLINE).fillCircle(23, 0, 6);
+  g.fillStyle(charged ? 0x9ff0ff : color).fillCircle(23, 0, 4.6);
+  g.fillStyle(0xffffff, 0.75).fillCircle(21.5, -1.5, 1.5);
 }

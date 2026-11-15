@@ -1,7 +1,7 @@
 import type { MessageKey } from '../i18n';
-import type { EquipSlot, Grade, ItemId } from '../sim';
+import type { EquipSlot, Grade, ItemId, WeaponType } from '../sim';
 
-export type RecipeItemId = 'recipeSoldierBlade' | 'recipeIronHelm' | 'recipeChainShirt' | 'recipeIronGreaves';
+export type RecipeItemId = 'recipeSoldierBlade' | 'recipeIronHelm' | 'recipeChainShirt' | 'recipeIronGreaves' | 'recipeLongbow' | 'recipeRunedStaff';
 
 // The rules know items only by ID. These tables turn IDs into translation
 // keys. Keys are written out in full so the translation check can find them,
@@ -17,6 +17,12 @@ export const ITEM_NAME: Record<Exclude<ItemId, 'coins' | RecipeItemId>, MessageK
   trainingSword: 'item.trainingSword',
   ironSword: 'item.ironSword',
   soldierBlade: 'item.soldierBlade',
+  trainingBow: 'item.trainingBow',
+  huntingBow: 'item.huntingBow',
+  longbow: 'item.longbow',
+  apprenticeStaff: 'item.apprenticeStaff',
+  oakStaff: 'item.oakStaff',
+  runedStaff: 'item.runedStaff',
   leatherCap: 'item.leatherCap',
   ironHelm: 'item.ironHelm',
   leatherJerkin: 'item.leatherJerkin',
@@ -42,6 +48,13 @@ export const SLOT_NAME: Record<EquipSlot, MessageKey> = {
   helmet: 'slot.helmet',
   armor: 'slot.armor',
   boots: 'slot.boots',
+};
+
+/** Kinds of weapon; each class fights with one of them. */
+export const WEAPON_NAME: Record<WeaponType, MessageKey> = {
+  sword: 'slot.weaponSword',
+  bow: 'slot.weaponBow',
+  staff: 'slot.weaponStaff',
 };
 
 export const GRADE_NAME: Record<Grade, MessageKey> = {

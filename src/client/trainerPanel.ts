@@ -1,7 +1,7 @@
 import type { I18n } from '../i18n';
-import { type Command, type World, SKILLS, SKILL_IDS, SKILL_PRICE, isNear, knows } from '../sim';
+import { type Command, type World, SKILLS, SKILL_PRICE, classSkills, isNear, knows } from '../sim';
 import { element, make } from './itemView';
-import { SKILL_INFO, SKILL_KEYS, SKILL_NAME } from './skillText';
+import { SKILL_INFO, SKILL_NAME, skillKeyLabel } from './skillText';
 
 /** The trainer's window: every skill, what it does, and whether it can be learned now. */
 export class TrainerPanel {
@@ -37,18 +37,18 @@ export class TrainerPanel {
     const { world, i18n } = this;
     if (!world || !this.isOpen) return;
     const { player } = world;
-    const state = `${player.level}/${player.coins}/${player.skills.join()}`;
+    const state = `${player.cls}/${player.level}/${player.coins}/${player.skills.join()}`;
     if (!force && state === this.drawn) return;
     this.drawn = state;
 
     element('trainer-coins').textContent = i18n.t('hud.coins', { count: player.coins });
     element('trainer-list').replaceChildren(
-      ...SKILL_IDS.map((id) => {
+      ...classSkills(player.cls).map((id) => {
         const def = SKILLS[id];
         const row = make('li', 'item-row');
         const info = make('span', 'item-info');
         info.append(
-          make('span', 'item-name', i18n.t('trainer.skill', { skill: i18n.t(SKILL_NAME[id]), key: SKILL_KEYS[id].label })),
+          make('span', 'item-name', i18n.t('trainer.skill', { skill: i18n.t(SKILL_NAME[id]), key: skillKeyLabel(id, player.cls) })),
           make('span', 'item-detail', i18n.t(SKILL_INFO[id])),
           make('span', 'item-detail', i18n.t('trainer.numbers', { cost: def.manaCost, level: def.unlockLevel })),
         );

@@ -1,10 +1,10 @@
 import type { I18n } from '../i18n';
 import {
   type Command, type EquipSlot, type ItemDef, type ItemId, type World,
-  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, enchantBonus, playerDamage, playerDefense, sellPrice,
+  CLASSES, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, enchantBonus, playerDamage, playerDefense, sellPrice,
 } from '../sim';
 import { itemIcon } from './itemIcon';
-import { GRADE_COLOR, GRADE_NAME, SLOT_NAME } from './itemText';
+import { GRADE_COLOR, GRADE_NAME, SLOT_NAME, WEAPON_NAME } from './itemText';
 import { element, itemEffect, itemName, make } from './itemView';
 
 /** Which cell the player has picked: a worn slot or a place in the bag. */
@@ -195,7 +195,9 @@ export class InventoryPanel {
     let better = false;
     if (def.kind === 'equipment') {
       color = `#${GRADE_COLOR[def.grade].toString(16).padStart(6, '0')}`;
-      lines.push(`${i18n.t(SLOT_NAME[def.slot])} · ${i18n.t(GRADE_NAME[def.grade])}`);
+      // A weapon says what kind it is, because only one class can use it.
+      const kind = def.slot === 'weapon' ? i18n.t(WEAPON_NAME[def.weaponType]) : i18n.t(SLOT_NAME[def.slot]);
+      lines.push(`${kind} · ${i18n.t(GRADE_NAME[def.grade])}`);
       better = this.isBetter(def, enchant);
     } else if (def.kind === 'scroll' || (def.kind === 'consumable' && def.effect.kind === 'charge')) {
       lines.push(i18n.t(GRADE_NAME[def.kind === 'scroll' ? def.grade : (def.effect as { grade: 'none' | 'd' }).grade]));
@@ -224,8 +226,11 @@ export class InventoryPanel {
   /** Compares an item, enchantment included, with what is worn in its slot. */
   private isBetter(def: Extract<ItemDef, { kind: 'equipment' }>, enchant: number): boolean {
     const player = this.world?.player;
-    const wornId = player?.equipment[def.slot];
-    if (!player || !wornId) return true;
+    if (!player) return false;
+    // A weapon the hero's class cannot use is never an improvement.
+    if (def.slot === 'weapon' && def.weaponType !== CLASSES[player.cls].weapon) return false;
+    const wornId = player.equipment[def.slot];
+    if (!wornId) return true;
     const worn = ITEMS[wornId];
     if (worn.kind !== 'equipment') return true;
     const mine = enchantBonus(def, enchant);

@@ -165,3 +165,26 @@ button.small { min-block-size: 22px; padding: 2px 8px; font-size: 12px; }
 .tabs button { border-block-end: none; border-radius: 2px 2px 0 0; background: #17181e; color: var(--muted); }
 .tabs button[aria-selected="true"] { background: linear-gradient(#3a321d, #1f1b10); color: var(--accent); border-color: var(--frame-light); }
 [role="tabpanel"] { display: flex; flex-direction: column; gap: 4px; }
+
+/* Hunter's bestiary */
+.bestiary { display: flex; flex-direction: column; gap: 2px; padding: 5px 6px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); }
+.bestiary .item-list { margin-block-start: 3px; }
+.drop-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.drop-row .icon { inline-size: 20px; block-size: 20px; flex: none; }
+.drop-name { flex: 1; min-inline-size: 0; overflow-wrap: anywhere; }
+.drop-chance { color: var(--accent); white-space: nowrap; }
+
+/* Creating a hero */
+#creation > div { max-width: 560px; }
+#creation h3 { margin: 12px 0 5px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.choices { display: flex; gap: 6px; }
+.overlay .choice { flex: 1; margin: 0; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; text-align: start; min-block-size: 0; }
+.choice strong { font-size: 14px; color: var(--ink); }
+.choice[aria-pressed="true"] { border-color: var(--accent); background: linear-gradient(#3a321d, #1f1b10); box-shadow: inset 0 0 0 1px var(--accent); }
+.choice[aria-pressed="true"] strong { color: var(--accent); }
+
+/* Developer shortcuts */
+#dev { position: fixed; inset-block-end: 44px; inset-inline-end: 312px; inline-size: 250px; display: flex; flex-direction: column; gap: 4px; }
+.dev-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+#dev-open { color: var(--warning); border-color: #6a4a2a; }
+#dev-reset { color: var(--warning); align-self: flex-start; }

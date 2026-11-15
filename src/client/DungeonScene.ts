@@ -1,14 +1,14 @@
 import Phaser from 'phaser';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Npc, type Point, type SkillId, type World, type ZoneKind,
-  ITEMS, PLAYER_ATTACK_ARC, SKILLS, SKILL_IDS, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
+  ITEMS, PLAYER_ATTACK_ARC, SKILLS, classSkills, weaponInHand, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
   isAlive, isMoving, isRoad, isWalkable, regionAt, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
 import { QUICK_KEYS } from './hotbar';
-import { SKILL_KEYS } from './skillText';
-import { drawBlade, drawMonsterFigure, drawNpcFigure, drawPerson, drawShadow } from './sprites';
+import { SKILL_SLOTS } from './skillText';
+import { drawHeroFigure, drawMonsterFigure, drawNpcFigure, drawShadow, drawWeapon } from './sprites';
 import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
 
 const WALL_HEIGHT = 30;
@@ -46,7 +46,8 @@ const COMMAND_KEYS: Record<string, Command> = {
   [QUICK_KEYS.manaPotion]: { type: 'use', itemId: 'manaPotion' },
   [QUICK_KEYS.charges]: { type: 'toggleCharges' },
 };
-const SKILL_BY_KEY = new Map<string, SkillId>(SKILL_IDS.map((id) => [SKILL_KEYS[id].code, id]));
+/** Skill keys by position: the class decides which skill each one uses. */
+const SKILL_SLOT_BY_KEY = new Map<string, number>(SKILL_SLOTS.map((slot, index) => [slot.code, index]));
 
 export interface SceneEvents {
   /** Health, the number of monsters or the hero's belongings changed. */
@@ -100,6 +101,8 @@ export class DungeonScene extends Phaser.Scene {
   private readonly heldKeys = new Set<string>();
   private holdTimer = 0;
   private peaceful = false;
+  /** True while a screen covers the game (creating a hero): nothing moves and no input is taken. */
+  private paused = false;
   private savedRevision = 0;
   private mapObjects: Phaser.GameObjects.GameObject[] = [];
   private floorTextures: string[] = [];
@@ -107,10 +110,13 @@ export class DungeonScene extends Phaser.Scene {
   private readonly obstacleOrigins = new Map<string, number>();
   private readonly monsterSprites = new Map<number, MonsterSprite>();
   private readonly lootSprites = new Map<number, Phaser.GameObjects.Graphics>();
+  private readonly projectileSprites = new Map<number, Phaser.GameObjects.Graphics>();
   private hero!: Phaser.GameObjects.Container;
   private heroFigure!: Phaser.GameObjects.Container;
   private weapon!: Phaser.GameObjects.Graphics;
-  private weaponCharged: boolean | null = null;
+  private heroBody!: Phaser.GameObjects.Graphics;
+  /** What the hero figure was last drawn from, so it is redrawn only when the look changes. */
+  private shownLook = '';
   /** Extra turn of the blade during a swing, in radians; eased back to zero. */
   private swing = 0;
   private targetRing!: Phaser.GameObjects.Graphics;
@@ -136,7 +142,7 @@ export class DungeonScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (!this.isOnGame(pointer)) return;
+      if (this.paused || !this.isOnGame(pointer)) return;
       this.holdTimer = 0;
       if (this.isMoveOrder(pointer)) this.orderMoveTo(pointer);
       else this.orderAttackAt(pointer);
@@ -144,18 +150,18 @@ export class DungeonScene extends Phaser.Scene {
 
     // Listening on the window keeps controls working even when a HUD button has focus.
     const onKeyDown = (event: KeyboardEvent) => {
-      const skill = SKILL_BY_KEY.get(event.code);
+      const skill = SKILL_SLOT_BY_KEY.get(event.code);
       const command = COMMAND_KEYS[event.code];
       const known =
         event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY ||
         event.code === INTERACT_KEY || skill !== undefined || command !== undefined;
-      if (!known || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!known || this.paused || event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.code === INVENTORY_KEY) {
         if (!event.repeat) this.events_.onToggleInventory();
         return;
       }
       if (skill !== undefined) {
-        if (!event.repeat) this.useSkill(skill, true);
+        if (!event.repeat) this.useSkillSlot(skill, true);
         return;
       }
       if (event.code === INTERACT_KEY) {
@@ -218,6 +224,9 @@ export class DungeonScene extends Phaser.Scene {
     for (const sprite of this.lootSprites.values()) sprite.destroy();
     this.lootSprites.clear();
     this.syncLoot();
+    for (const sprite of this.projectileSprites.values()) sprite.destroy();
+    this.projectileSprites.clear();
+    this.shownLook = '';
     this.placeHero(world.player.pos);
     this.hero.setAlpha(isAlive(world) ? 1 : 0.35);
     this.cameras.main.centerOn(this.hero.x, this.hero.y);
@@ -229,6 +238,14 @@ export class DungeonScene extends Phaser.Scene {
     this.peaceful = peaceful;
   }
 
+  /** Freezes or resumes the game; used while the hero is being created. */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.heldKeys.clear();
+    this.pending = [];
+    this.lastFrameAt = performance.now();
+  }
+
   /** Sends a command from outside the scene, for example from a HUD button. */
   send(command: Command): void {
     this.pending.push(command);
@@ -238,8 +255,15 @@ export class DungeonScene extends Phaser.Scene {
    * Uses a skill. From the keyboard it is aimed at the cursor; from a HUD
    * button the cursor is on the button, so the hero aims at the nearest monster.
    */
+  /** Uses the skill on the given key (0 for Q, 1 for E, 2 for R): which skill that is depends on the hero's class. */
+  useSkillSlot(slot: number, aimAtCursor: boolean): void {
+    const id = classSkills(this.world.player.cls)[slot];
+    if (id) this.useSkill(id, aimAtCursor);
+  }
+
   useSkill(id: SkillId, aimAtCursor: boolean): void {
-    if (this.peaceful && SKILLS[id].effect.kind === 'strike') return;
+    const { kind } = SKILLS[id].effect;
+    if (this.peaceful && (kind === 'strike' || kind === 'shot' || kind === 'nova')) return;
     const { pos } = this.world.player;
     let dir: Point;
     if (aimAtCursor) {
@@ -257,6 +281,7 @@ export class DungeonScene extends Phaser.Scene {
     const now = performance.now();
     const delta = now - this.lastFrameAt;
     this.lastFrameAt = now;
+    if (this.paused) return;
 
     this.readHeldInput(delta);
 
@@ -282,6 +307,7 @@ export class DungeonScene extends Phaser.Scene {
       y: this.previous.y + (pos.y - this.previous.y) * alpha,
     });
     this.animateHero();
+    this.syncProjectiles(alpha);
     this.syncMonsters(alpha);
     this.updateTarget();
     this.syncLoot();
@@ -420,8 +446,22 @@ export class DungeonScene extends Phaser.Scene {
         this.showSwing(event.dir, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, event.charged ? CHARGE_COLOR : 0xffffff);
         this.swingBlade();
         return false;
+      case 'playerShot':
+        this.swingBlade();
+        return false;
+      case 'projectileEnded': {
+        const at = tileToScreen(event.pos.x, event.pos.y);
+        this.showSparks(at.x, at.y - 14, event.kind === 'bolt' ? 0xb9a0ff : 0xe8d9b0);
+        return false;
+      }
+      case 'equipDenied':
+        this.events_.onNotice(event);
+        return false;
       case 'skillUsed': {
         const { effect } = SKILLS[event.id];
+        if (effect.kind === 'nova') this.showSwing(event.dir, Math.PI * 2, effect.radius, 0x9fe0ff);
+        if (effect.kind === 'haste') this.showRing(0x9ff0d0);
+        if (effect.kind === 'shot') this.swingBlade();
         if (effect.kind === 'strike') {
           this.showSwing(event.dir, effect.arc, effect.range, event.charged ? CHARGE_COLOR : 0xffb347);
           this.swingBlade();
@@ -588,10 +628,9 @@ export class DungeonScene extends Phaser.Scene {
   private createHero(): Phaser.GameObjects.Container {
     const shadow = this.add.graphics();
     drawShadow(shadow, 30);
-    const body = this.add.graphics();
-    drawPerson(body, { clothes: 0x3f6fb5, hair: 0x6b4a2a });
+    this.heroBody = this.add.graphics();
     this.weapon = this.add.graphics({ x: 0, y: -20 });
-    this.heroFigure = this.add.container(0, 0, [body, this.weapon]);
+    this.heroFigure = this.add.container(0, 0, [this.heroBody, this.weapon]);
     return this.add.container(0, 0, [shadow, this.heroFigure]);
   }
 
@@ -609,10 +648,21 @@ export class DungeonScene extends Phaser.Scene {
 
   /** The blade points where the hero faces; a walking hero bobs a little. */
   private animateHero(): void {
-    const { facing, chargesOn } = this.world.player;
-    if (chargesOn !== this.weaponCharged) {
-      this.weaponCharged = chargesOn;
-      drawBlade(this.weapon, chargesOn);
+    const { player } = this.world;
+    const { facing, chargesOn, equipment, race, cls } = player;
+    const look = `${race}/${cls}/${equipment.weapon}/${equipment.helmet}/${equipment.armor}/${equipment.boots}/${chargesOn}`;
+    if (look !== this.shownLook) {
+      this.shownLook = look;
+      // Worn pieces are painted in the colour of their material: leather brown, graded steel blue-grey.
+      const colour = (itemId: ItemId | null): number | null => {
+        if (!itemId) return null;
+        const def = ITEMS[itemId];
+        return def.kind === 'equipment' && def.grade === 'd' ? 0x8fa8c8 : 0x9a6a3a;
+      };
+      drawHeroFigure(this.heroBody, { race, cls, armor: colour(equipment.armor), helmet: colour(equipment.helmet), boots: colour(equipment.boots) });
+      const weapon = equipment.weapon ? ITEMS[equipment.weapon] : null;
+      const steel = weapon && weapon.kind === 'equipment' && weapon.grade === 'd' ? 0x9fc4f2 : equipment.weapon === 'ironSword' ? 0xd9dde6 : 0xb98d57;
+      drawWeapon(this.weapon, weaponInHand(player), steel, chargesOn);
     }
     const tip = tileToScreen(facing.x, facing.y);
     this.weapon.setRotation(Math.atan2(tip.y, tip.x) + this.swing);
@@ -756,6 +806,45 @@ export class DungeonScene extends Phaser.Scene {
     const line = this.add.graphics().setDepth(EFFECT_DEPTH);
     line.lineStyle(3, 0xffffff, 0.8).lineBetween(from.x + 12, from.y - 62, target.x, target.y - 14);
     this.tweens.add({ targets: line, alpha: 0, duration: 160, onComplete: () => line.destroy() });
+  }
+
+  /** Arrows and bolts in flight, drawn a little ahead of their last known place so they move smoothly between ticks. */
+  private syncProjectiles(alpha: number): void {
+    const flying = new Set<number>();
+    for (const missile of this.world.projectiles) {
+      flying.add(missile.id);
+      let sprite = this.projectileSprites.get(missile.id);
+      if (!sprite) {
+        sprite = this.add.graphics();
+        const tip = tileToScreen(missile.dir.x, missile.dir.y);
+        const length = Math.hypot(tip.x, tip.y) || 1;
+        const ux = tip.x / length;
+        const uy = tip.y / length;
+        if (missile.kind === 'arrow') {
+          sprite.lineStyle(3.5, 0x14110d, 1).lineBetween(-ux * 12, -uy * 12, ux * 8, uy * 8);
+          sprite.lineStyle(2, missile.charged ? CHARGE_COLOR : 0xe8d9b0, 1).lineBetween(-ux * 12, -uy * 12, ux * 8, uy * 8);
+          sprite.fillStyle(0xcfd3dc).fillCircle(ux * 9, uy * 9, 2.2);
+        } else {
+          const colour = missile.splash > 0 ? 0xff8a3d : missile.charged ? CHARGE_COLOR : 0xb9a0ff;
+          sprite.fillStyle(colour, 0.3).fillCircle(0, 0, 10);
+          sprite.fillStyle(colour).fillCircle(0, 0, 5.5);
+          sprite.fillStyle(0xffffff, 0.9).fillCircle(-1, -1, 2.2);
+          sprite.fillStyle(colour, 0.5).fillCircle(-ux * 8, -uy * 8, 3.5);
+        }
+        this.projectileSprites.set(missile.id, sprite);
+      }
+      const ahead = (missile.speed * TICK_MS * alpha) / 1000;
+      const x = missile.pos.x + missile.dir.x * ahead;
+      const y = missile.pos.y + missile.dir.y * ahead;
+      const at = tileToScreen(x, y);
+      // Missiles fly at chest height.
+      sprite.setPosition(at.x, at.y - 20).setDepth(x + y + 0.1);
+    }
+    for (const [id, sprite] of this.projectileSprites) {
+      if (flying.has(id)) continue;
+      sprite.destroy();
+      this.projectileSprites.delete(id);
+    }
   }
 
   private createLootSprite(loot: GroundLoot): Phaser.GameObjects.Graphics {

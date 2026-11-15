@@ -7,6 +7,7 @@ export const NPC_NAME: Record<NpcKind, MessageKey> = {
   outfitter: 'npc.outfitter',
   blacksmith: 'npc.blacksmith',
   trainer: 'npc.trainer',
+  hunter: 'npc.hunter',
   guard: 'npc.guard',
 };
 
@@ -16,6 +17,7 @@ export const NPC_LOOK: Record<NpcKind, { clothes: number; shade: number; sign: n
   outfitter: { clothes: 0x8a5a2c, shade: 0x66421f, sign: 0xf2c94c },
   blacksmith: { clothes: 0x4a4d57, shade: 0x34363d, sign: 0xff9a3d },
   trainer: { clothes: 0x6a4a9c, shade: 0x4c3472, sign: 0x9fd0ff },
+  hunter: { clothes: 0x5a6b3a, shade: 0x3f4c28, sign: 0xb7e07a },
   guard: { clothes: 0x9aa0ab, shade: 0x6e747f, sign: 0xcfd3dc },
 };
 

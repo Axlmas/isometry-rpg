@@ -1,9 +1,9 @@
 import type { I18n } from '../i18n';
-import { type Command, type ItemId, type SkillId, type World, SKILLS, SKILL_IDS, TICK_MS, chargeForWeapon, countItem } from '../sim';
+import { type ClassId, type Command, type ItemId, type SkillId, type World, SKILLS, TICK_MS, chargeForWeapon, classSkills, countItem } from '../sim';
 import { itemIcon } from './itemIcon';
 import { element, itemEffect, itemName, make } from './itemView';
 import { skillIcon } from './skillIcon';
-import { SKILL_INFO, SKILL_KEYS, SKILL_NAME } from './skillText';
+import { SKILL_INFO, SKILL_NAME, SKILL_SLOTS } from './skillText';
 
 /** Physical keys (KeyboardEvent.code) of the potion and charge slots. */
 export const QUICK_KEYS = { healthPotion: 'Digit1', manaPotion: 'Digit2', charges: 'KeyF' } as const;
@@ -23,7 +23,10 @@ interface Slot {
  * countdown while it cannot be used; pointing at a slot explains it.
  */
 export class Hotbar {
-  private readonly skills = new Map<SkillId, Slot>();
+  /** One slot per skill key; which skill sits in it depends on the hero's class. */
+  private readonly skillSlots: Slot[] = [];
+  private skillIds: SkillId[] = [];
+  private shownClass: ClassId | null = null;
   private readonly potions: Record<'healthPotion' | 'manaPotion', Slot>;
   private readonly charges: Slot;
   private chargeIcon: ItemId | null = null;
@@ -31,15 +34,13 @@ export class Hotbar {
 
   constructor(
     private readonly i18n: I18n,
-    onSkill: (id: SkillId) => void,
+    onSkill: (slot: number) => void,
     send: (command: Command) => void,
   ) {
     const bar = element('skills');
-    for (const id of SKILL_IDS) {
-      const slot = this.createSlot(bar, SKILL_KEYS[id].label, () => onSkill(id), () => this.describeSkill(id));
-      slot.icon.replaceChildren(skillIcon(id));
-      this.skills.set(id, slot);
-    }
+    SKILL_SLOTS.forEach((key, index) => {
+      this.skillSlots.push(this.createSlot(bar, key.label, () => onSkill(index), () => this.describeSkill(this.skillIds[index] as SkillId)));
+    });
     bar.append(make('span', 'bar-gap'));
     const potion = (id: 'healthPotion' | 'manaPotion', key: string): Slot => {
       const slot = this.createSlot(bar, key, () => send({ type: 'use', itemId: id }), () => [itemName(this.i18n, id), itemEffect(this.i18n, id)]);
@@ -108,12 +109,18 @@ export class Hotbar {
     };
     const seconds = (ticks: number): string => (ticks > 0 ? String(Math.ceil((ticks * TICK_MS) / 1000)) : '');
 
-    for (const id of SKILL_IDS) {
+    if (player.cls !== this.shownClass) {
+      // A different hero: put that class's skills into the slots.
+      this.shownClass = player.cls;
+      this.skillIds = classSkills(player.cls);
+      this.skillSlots.forEach((slot, index) => slot.icon.replaceChildren(skillIcon(this.skillIds[index] as SkillId)));
+    }
+    for (const [index, id] of this.skillIds.entries()) {
       const def = SKILLS[id];
       const locked = player.level < def.unlockLevel || !player.skills.includes(id);
       const cooling = player.skillCooldowns[id];
       const noMana = player.mp < def.manaCost;
-      set(this.skills.get(id) as Slot, this.describeSkill(id).join('. '), '', locked ? '' : seconds(cooling), {
+      set(this.skillSlots[index] as Slot, this.describeSkill(id).join('. '), '', locked ? '' : seconds(cooling), {
         locked,
         unavailable: !locked && cooling > 0,
         'no-mana': !locked && cooling === 0 && noMana,

@@ -50,6 +50,17 @@ const recipePage = (mark: string): string => `
   <path d="${mark}" stroke="#3f6fb0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M11 23 H22 M11 25.5 H18" stroke="#8a7c5c" stroke-width="1"/>`;
 
+const bow = (wood: string, string: string): string => `
+  <path d="M9 4 Q27 16 9 28" fill="none" stroke="#12141a" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M9 4 Q27 16 9 28" fill="none" stroke="${wood}" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M9 4 L9 28" stroke="${string}" stroke-width="1.2"/>
+  <path d="M6 16 H24" stroke="#e8d9b0" stroke-width="1.5"/><path d="M26 16 L21 13.5 L21 18.5 Z" fill="#cfd3dc" ${OUTLINE}/>`;
+
+const staff = (wood: string, orb: string): string => `
+  <path d="M8 28 L22 9" stroke="#12141a" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M8 28 L22 9" stroke="${wood}" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="23" cy="8" r="5" fill="${orb}" ${OUTLINE}/><circle cx="21.5" cy="6.5" r="1.6" fill="#ffffff" opacity="0.8"/>`;
+
 const IRON = '#b8bcc6';
 const IRON_DARK = '#7f8591';
 const LEATHER = '#a8743e';
@@ -69,6 +80,13 @@ const ICONS: Record<ItemId, string> = {
   trainingSword: sword('#b98d57', '#7a5a33'),
   ironSword: sword(IRON, IRON_DARK),
   soldierBlade: sword(D_STEEL, '#d9b24a', true),
+
+  trainingBow: bow('#b98d57', '#e8dcc0'),
+  huntingBow: bow('#8a5a2c', '#e8dcc0'),
+  longbow: bow(D_STEEL_DARK, '#d6eaff'),
+  apprenticeStaff: staff('#b98d57', '#cfd3dc'),
+  oakStaff: staff('#6e4a24', '#7fe0a0'),
+  runedStaff: staff('#4a3a6a', '#8fbaf2'),
 
   leatherCap: helmet(LEATHER, LEATHER_DARK, false),
   ironHelm: helmet(D_STEEL, D_STEEL_DARK, true),
@@ -95,6 +113,8 @@ const ICONS: Record<ItemId, string> = {
   recipeIronHelm: recipePage('M11 19 Q11 10 16 10 Q21 10 21 19 Z'),
   recipeChainShirt: recipePage(SHIELD_MARK),
   recipeIronGreaves: recipePage('M13 10 H18 V16 Q22 17 22 20 H12 Z'),
+  recipeLongbow: recipePage('M13 10 Q21 15 13 21 M13 10 V21'),
+  recipeRunedStaff: recipePage('M12 21 L19 12 M19 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0'),
 };
 
 /** An element showing the item's picture. Purely decorative: the name is given in text elsewhere. */

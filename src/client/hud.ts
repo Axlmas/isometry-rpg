@@ -77,6 +77,12 @@ export class Hud {
     this.setBar('xp', xp, needed, spoken, needed > 0 ? i18n.t('hud.bar', { current: xp, max: needed }) : i18n.t('hud.xpMax'));
   }
 
+  /** Opens the help window, for a player who has just made a hero. */
+  showHelp(): void {
+    element('help').hidden = false;
+    element('help-open').setAttribute('aria-expanded', 'true');
+  }
+
   /** Shows whom the hero is fighting or pointing at; null hides the frame. */
   setTarget(target: { name: string; level: number; hp: number; maxHp: number } | null): void {
     const frame = element('target');
@@ -129,6 +135,11 @@ export class Hud {
     const prompt = element('prompt');
     if (prompt.hidden !== (text === null)) prompt.hidden = text === null;
     if (text !== null && prompt.textContent !== text) prompt.textContent = text;
+  }
+
+  /** The hero's name line in the status frame: race and class until heroes can be named. */
+  setHero(text: string): void {
+    element('hero-name').textContent = text;
   }
 
   setDeathVisible(visible: boolean): void {
