@@ -1,11 +1,11 @@
 import type { I18n } from '../i18n';
 import {
   type Command, type EquipSlot, type ItemDef, type ItemId, type World,
-  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, playerDamage, playerDefense, sellPrice,
+  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, enchantBonus, playerDamage, playerDefense, sellPrice,
 } from '../sim';
 import { itemIcon } from './itemIcon';
 import { GRADE_COLOR, GRADE_NAME, SLOT_NAME } from './itemText';
-import { element, itemName, make } from './itemView';
+import { element, itemEffect, itemName, make } from './itemView';
 
 /** Which cell the player has picked: a worn slot or a place in the bag. */
 type Selection = { kind: 'slot'; slot: EquipSlot } | { kind: 'bag'; index: number } | null;
@@ -27,7 +27,7 @@ export class InventoryPanel {
   private drawnRevision = -1;
   private selection: Selection = null;
   /** The item that was in the picked cell, to notice when an action puts something else there. */
-  private selectedItem: ItemId | null = null;
+  private selectedItem: string | null = null;
   private readonly slotCells = new Map<EquipSlot, Cell>();
   private readonly bagCells: Cell[] = [];
 
@@ -87,16 +87,18 @@ export class InventoryPanel {
     for (const slot of EQUIP_SLOTS) {
       const itemId = player.equipment[slot];
       const label = i18n.t(SLOT_NAME[slot]);
-      this.fillCell(this.slotCells.get(slot) as Cell, itemId, 1, itemId ? `${label}: ${this.spoken(itemId, 1)}` : `${label}: ${i18n.t('inventory.emptySlot')}`, force, label);
+      const enchant = player.equipmentEnchant[slot];
+      this.fillCell(this.slotCells.get(slot) as Cell, itemId, 1, enchant, itemId ? `${label}: ${this.spoken(itemId, 1, enchant)}` : `${label}: ${i18n.t('inventory.emptySlot')}`, force, label);
     }
     this.bagCells.forEach((cell, index) => {
       const stack = player.inventory[index];
-      this.fillCell(cell, stack?.itemId ?? null, stack?.count ?? 0, stack ? this.spoken(stack.itemId, stack.count) : i18n.t('inventory.emptyCell'), force);
+      const enchant = stack?.enchant ?? 0;
+      this.fillCell(cell, stack?.itemId ?? null, stack?.count ?? 0, enchant, stack ? this.spoken(stack.itemId, stack.count, enchant) : i18n.t('inventory.emptyCell'), force);
     });
     element('inventory-count').textContent = i18n.t('inventory.bag', { used: player.inventory.length, total: INVENTORY_SLOTS });
 
     // An action may have moved or removed the picked item; do not leave the selection on something else.
-    if (this.selection && this.itemAt(this.selection)?.itemId !== this.selectedItem) this.selection = null;
+    if (this.selection && this.identity(this.itemAt(this.selection)) !== this.selectedItem) this.selection = null;
     this.showSelection();
   }
 
@@ -108,7 +110,7 @@ export class InventoryPanel {
     root.addEventListener('click', () => {
       const item = this.itemAt(where);
       this.selection = item ? where : null;
-      this.selectedItem = item?.itemId ?? null;
+      this.selectedItem = this.identity(item);
       this.showSelection();
     });
     root.addEventListener('dblclick', () => this.act(where));
@@ -117,8 +119,8 @@ export class InventoryPanel {
     return { root, shown: '' };
   }
 
-  private fillCell(cell: Cell, itemId: ItemId | null, count: number, spoken: string, force: boolean, emptyLabel = ''): void {
-    const shown = `${itemId ?? ''}/${count}/${emptyLabel}`;
+  private fillCell(cell: Cell, itemId: ItemId | null, count: number, enchant: number, spoken: string, force: boolean, emptyLabel = ''): void {
+    const shown = `${itemId ?? ''}/${count}/${enchant}/${emptyLabel}`;
     if (!force && shown === cell.shown) return;
     cell.shown = shown;
     cell.root.setAttribute('aria-label', spoken);
@@ -134,18 +136,24 @@ export class InventoryPanel {
     else delete cell.root.dataset.grade;
     const parts: HTMLElement[] = [itemIcon(itemId)];
     if (count > 1) parts.push(make('span', 'cell-count', String(count)));
+    if (enchant > 0) parts.push(make('span', 'cell-enchant', `+${enchant}`));
     cell.root.replaceChildren(...parts);
   }
 
-  private itemAt(where: NonNullable<Selection>): { itemId: ItemId; count: number } | null {
+  private itemAt(where: NonNullable<Selection>): { itemId: ItemId; count: number; enchant: number } | null {
     const player = this.world?.player;
     if (!player) return null;
     if (where.kind === 'slot') {
       const itemId = player.equipment[where.slot];
-      return itemId ? { itemId, count: 1 } : null;
+      return itemId ? { itemId, count: 1, enchant: player.equipmentEnchant[where.slot] } : null;
     }
     const stack = player.inventory[where.index];
-    return stack ? { itemId: stack.itemId, count: stack.count } : null;
+    return stack ? { itemId: stack.itemId, count: stack.count, enchant: stack.enchant ?? 0 } : null;
+  }
+
+  /** Tells one item from another, so the selection is dropped when a different item lands in the picked cell. */
+  private identity(item: { itemId: ItemId; enchant: number } | null): string | null {
+    return item ? `${item.itemId}+${item.enchant}` : null;
   }
 
   /** The obvious thing to do with an item, and its name as a translation key; null when there is none. */
@@ -174,10 +182,10 @@ export class InventoryPanel {
   // ------------------------------------------------------- item description
 
   /** Everything there is to say about an item, line by line. Used by the tooltip and the panel under the grid. */
-  private lines(itemId: ItemId, count: number): { name: string; color: string | null; lines: string[]; better: boolean } {
+  private lines(itemId: ItemId, count: number, enchant: number): { name: string; color: string | null; lines: string[]; better: boolean } {
     const { i18n } = this;
     const def = ITEMS[itemId];
-    const base = itemId === 'coins' ? '' : itemName(i18n, itemId);
+    const base = itemId === 'coins' ? '' : itemName(i18n, itemId, enchant);
     const name = count > 1 ? i18n.t('inventory.stack', { item: base, count }) : base;
     const lines: string[] = [];
     let color: string | null = null;
@@ -185,28 +193,24 @@ export class InventoryPanel {
     if (def.kind === 'equipment') {
       color = `#${GRADE_COLOR[def.grade].toString(16).padStart(6, '0')}`;
       lines.push(`${i18n.t(SLOT_NAME[def.slot])} · ${i18n.t(GRADE_NAME[def.grade])}`);
-      lines.push(def.slot === 'weapon' ? i18n.t('inventory.damage', { min: def.damage[0], max: def.damage[1] }) : i18n.t('inventory.defense', { value: def.defense }));
-      better = this.isBetter(def);
-    } else if (def.kind === 'material') {
-      lines.push(i18n.t('inventory.material'));
-    } else if (def.kind === 'consumable') {
-      if (def.effect.kind === 'heal') lines.push(i18n.t('inventory.heal', { amount: def.effect.amount }));
-      else if (def.effect.kind === 'mana') lines.push(i18n.t('inventory.manaRestore', { amount: def.effect.amount }));
-      else lines.push(i18n.t('inventory.charge'), i18n.t(GRADE_NAME[def.effect.grade]));
+      better = this.isBetter(def, enchant);
+    } else if (def.kind === 'scroll' || (def.kind === 'consumable' && def.effect.kind === 'charge')) {
+      lines.push(i18n.t(GRADE_NAME[def.kind === 'scroll' ? def.grade : (def.effect as { grade: 'none' | 'd' }).grade]));
     }
+    lines.push(itemEffect(i18n, itemId, enchant));
     const price = sellPrice(itemId);
     lines.push(price > 0 ? i18n.t('tooltip.sells', { price }) : i18n.t('tooltip.noValue'));
     return { name, color, lines, better };
   }
 
   /** The description as one sentence, for screen readers. */
-  private spoken(itemId: ItemId, count: number): string {
-    const { name, lines } = this.lines(itemId, count);
+  private spoken(itemId: ItemId, count: number, enchant: number): string {
+    const { name, lines } = this.lines(itemId, count, enchant);
     return [name, ...lines].join('. ');
   }
 
-  private describe(itemId: ItemId, count: number, worn: boolean): HTMLElement[] {
-    const { name, color, lines, better } = this.lines(itemId, count);
+  private describe(itemId: ItemId, count: number, enchant: number, worn: boolean): HTMLElement[] {
+    const { name, color, lines, better } = this.lines(itemId, count, enchant);
     const title = make('strong', 'item-name', name);
     if (color) title.style.color = color;
     const nodes: HTMLElement[] = [title, ...lines.map((line) => make('span', 'item-detail', line))];
@@ -214,15 +218,19 @@ export class InventoryPanel {
     return nodes;
   }
 
-  private isBetter(def: Extract<ItemDef, { kind: 'equipment' }>): boolean {
-    const wornId = this.world?.player.equipment[def.slot];
-    if (!wornId) return true;
+  /** Compares an item, enchantment included, with what is worn in its slot. */
+  private isBetter(def: Extract<ItemDef, { kind: 'equipment' }>, enchant: number): boolean {
+    const player = this.world?.player;
+    const wornId = player?.equipment[def.slot];
+    if (!player || !wornId) return true;
     const worn = ITEMS[wornId];
     if (worn.kind !== 'equipment') return true;
+    const mine = enchantBonus(def, enchant);
+    const theirs = enchantBonus(worn, player.equipmentEnchant[def.slot]);
     if (def.slot === 'weapon' && worn.slot === 'weapon') {
-      return def.damage[0] + def.damage[1] > worn.damage[0] + worn.damage[1];
+      return def.damage[0] + def.damage[1] + mine * 2 > worn.damage[0] + worn.damage[1] + theirs * 2;
     }
-    return def.slot !== 'weapon' && worn.slot !== 'weapon' && def.defense > worn.defense;
+    return def.slot !== 'weapon' && worn.slot !== 'weapon' && def.defense + mine > worn.defense + theirs;
   }
 
   // ------------------------------------------------- selection and tooltip
@@ -240,7 +248,7 @@ export class InventoryPanel {
       return;
     }
     const text = make('div', 'detail-text');
-    text.append(...this.describe(item.itemId, item.count, selection.kind === 'slot'));
+    text.append(...this.describe(item.itemId, item.count, item.enchant, selection.kind === 'slot'));
     const actions = make('div', 'detail-actions');
     const action = this.primary(selection);
     if (action) actions.append(this.button(action.label, action.command, true));
@@ -262,7 +270,7 @@ export class InventoryPanel {
       tooltip.hidden = true;
       return;
     }
-    const nodes = this.describe(item.itemId, item.count, where.kind === 'slot');
+    const nodes = this.describe(item.itemId, item.count, item.enchant, where.kind === 'slot');
     const action = this.primary(where);
     if (action) nodes.push(make('span', 'tooltip-hint', action.hint));
     tooltip.replaceChildren(...nodes);

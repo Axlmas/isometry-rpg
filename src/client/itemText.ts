@@ -24,6 +24,11 @@ export const ITEM_NAME: Record<Exclude<ItemId, 'coins'>, MessageKey> = {
   manaPotion: 'item.manaPotion',
   chargePlain: 'item.chargePlain',
   chargeD: 'item.chargeD',
+  crystalD: 'item.crystalD',
+  scrollWeaponPlain: 'item.scrollWeaponPlain',
+  scrollArmorPlain: 'item.scrollArmorPlain',
+  scrollWeaponD: 'item.scrollWeaponD',
+  scrollArmorD: 'item.scrollArmorD',
 };
 
 export const SLOT_NAME: Record<EquipSlot, MessageKey> = {

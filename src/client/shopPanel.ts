@@ -1,11 +1,14 @@
 import type { I18n } from '../i18n';
-import { type Command, type ItemId, type World, SHOP_STOCK, buyPrice, isNearMerchant, maxStackOf, sellPrice } from '../sim';
+import { type Command, type ItemId, type NpcKind, type World, SHOP_STOCK, buyPrice, isNear, maxStackOf, sellPrice } from '../sim';
+import { NPC_NAME } from './npcText';
 import { describeItem, element, make } from './itemView';
 
 /** The merchant's window: what he sells and what he will buy from the bag. */
 export class ShopPanel {
   private world: World | null = null;
   private drawnRevision = -1;
+  /** Whose shop is open. */
+  private merchant: NpcKind = 'alchemist';
 
   constructor(
     private readonly i18n: I18n,
@@ -20,6 +23,12 @@ export class ShopPanel {
     return !element('shop').hidden;
   }
 
+  /** Opens the shop of the given merchant. */
+  open(merchant: NpcKind): void {
+    this.merchant = merchant;
+    this.toggle(true);
+  }
+
   toggle(open = !this.isOpen): void {
     if (open !== this.isOpen) this.onToggle(open);
     element('shop').hidden = !open;
@@ -30,7 +39,7 @@ export class ShopPanel {
   update(world: World): void {
     const changed = world !== this.world;
     this.world = world;
-    if (this.isOpen && (!isNearMerchant(world) || world.player.hp <= 0)) this.toggle(false);
+    if (this.isOpen && (!isNear(world, this.merchant) || world.player.hp <= 0)) this.toggle(false);
     this.render(changed);
   }
 
@@ -41,9 +50,10 @@ export class ShopPanel {
     if (!force && player.revision === this.drawnRevision) return;
     this.drawnRevision = player.revision;
 
+    element('shop-title').textContent = i18n.t(NPC_NAME[this.merchant]);
     element('shop-coins').textContent = i18n.t('hud.coins', { count: player.coins });
     element('shop-stock').replaceChildren(
-      ...SHOP_STOCK.map((itemId) => {
+      ...(SHOP_STOCK[this.merchant] ?? []).map((itemId) => {
         const row = make('li', 'item-row');
         const price = buyPrice(itemId);
         row.append(describeItem(i18n, itemId, 1), make('span', 'item-price', i18n.t('shop.price', { price })));
@@ -61,7 +71,7 @@ export class ShopPanel {
     element('shop-bag').replaceChildren(
       ...player.inventory.map((stack, index) => {
         const row = make('li', 'item-row');
-        row.append(describeItem(i18n, stack.itemId as ItemId, stack.count));
+        row.append(describeItem(i18n, stack.itemId as ItemId, stack.count, stack.enchant ?? 0));
         const price = sellPrice(stack.itemId);
         if (price <= 0) {
           row.append(make('span', 'item-empty', i18n.t('shop.noValue')));

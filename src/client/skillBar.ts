@@ -43,11 +43,15 @@ export class SkillBar {
       const def = SKILLS[id];
       const button = this.buttons.get(id);
       if (!button) continue;
-      const locked = player.level < def.unlockLevel;
+      const tooLow = player.level < def.unlockLevel;
+      // Unusable until the trainer has taught it.
+      const locked = tooLow || !player.skills.includes(id);
       const cooling = player.skillCooldowns[id];
       const noMana = player.mp < def.manaCost;
-      const state = locked
+      const state = tooLow
         ? i18n.t('skills.locked', { level: def.unlockLevel })
+        : locked
+          ? i18n.t('skills.unlearned')
         : cooling > 0
           ? i18n.t('skills.cooldown', { seconds: Math.ceil((cooling * TICK_MS) / 1000) })
           : i18n.t('skills.cost', { cost: def.manaCost });

@@ -46,9 +46,9 @@
     <div id="item-detail"></div>
   </aside>
 
-  <aside id="shop" class="panel" aria-labelledby="shop-title" hidden>
+  <aside id="shop" class="panel talk" aria-labelledby="shop-title" hidden>
     <div class="panel-head">
-      <h2 id="shop-title" data-i18n="shop.title"></h2>
+      <h2 id="shop-title"></h2>
       <button id="shop-close" type="button" class="small" data-i18n="inventory.close"></button>
     </div>
     <p id="shop-coins"></p>
@@ -57,6 +57,30 @@
     <h3 data-i18n="shop.yourBag"></h3>
     <p id="shop-empty" class="item-empty" data-i18n="shop.nothingToSell"></p>
     <ul id="shop-bag" class="item-list"></ul>
+  </aside>
+
+  <aside id="trainer" class="panel talk" aria-labelledby="trainer-title" hidden>
+    <div class="panel-head">
+      <h2 id="trainer-title" data-i18n="npc.trainer"></h2>
+      <button id="trainer-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="trainer-coins" class="coins"></p>
+    <p class="item-detail" data-i18n="trainer.intro"></p>
+    <ul id="trainer-list" class="item-list"></ul>
+  </aside>
+
+  <aside id="forge" class="panel talk" aria-labelledby="forge-title" hidden>
+    <div class="panel-head">
+      <h2 id="forge-title" data-i18n="npc.blacksmith"></h2>
+      <button id="forge-close" type="button" class="small" data-i18n="inventory.close"></button>
+    </div>
+    <p id="forge-coins" class="coins"></p>
+    <p class="item-detail" data-i18n="forge.intro"></p>
+    <h3 data-i18n="forge.items"></h3>
+    <p id="forge-empty" class="item-empty" data-i18n="forge.nothing"></p>
+    <ul id="forge-items" class="item-list"></ul>
+    <h3 data-i18n="forge.scrolls"></h3>
+    <ul id="forge-stock" class="item-list"></ul>
   </aside>
 
   <div id="banner" role="status" hidden>

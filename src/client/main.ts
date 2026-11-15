@@ -2,16 +2,19 @@ import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import {
   type GameEvent, type Region, type World, type ZoneKind, MAX_LEVEL, SKILLS,
-  characterOf, createWorld, isAlive, isNearMerchant, minesLevelFor, nearestExit, regionAt, travelerOf, xpToNextLevel,
+  SHOP_STOCK, characterOf, createWorld, isAlive, minesLevelFor, nearestExit, nearestNpc, regionAt, travelerOf, xpToNextLevel,
 } from '../sim';
 import { DungeonScene } from './DungeonScene';
+import { ForgePanel } from './forgePanel';
 import { Hud } from './hud';
 import { InventoryPanel } from './inventoryPanel';
 import { itemName } from './itemView';
+import { NPC_NAME } from './npcText';
 import { QuickBar } from './quickBar';
 import { loadLocale, loadWorld, openStorage, saveLocale, saveWorld } from './save';
 import { ShopPanel } from './shopPanel';
 import { SkillBar } from './skillBar';
+import { TrainerPanel } from './trainerPanel';
 import { SKILL_NAME } from './skillText';
 import { REGION_NAME } from './zoneText';
 import './style.css';
@@ -41,8 +44,9 @@ function persist(): void {
 
 /** What the T key would do right now, shown to the player as a reminder. */
 function promptText(w: World): string | null {
-  if (!isAlive(w) || shop.isOpen) return null;
-  if (isNearMerchant(w)) return i18n.t('prompt.trade');
+  if (!isAlive(w) || isTalking()) return null;
+  const npc = nearestNpc(w);
+  if (npc) return i18n.t('prompt.talk', { npc: i18n.t(NPC_NAME[npc.kind]) });
   const exit = nearestExit(w);
   return exit ? i18n.t('prompt.travel', { zone: i18n.t(REGION_NAME[exit.leadsTo]) }) : null;
 }
@@ -82,6 +86,8 @@ function onTick(w: World): void {
   skillBar.update(w);
   quickBar.update(w);
   shop.update(w);
+  trainer.update(w);
+  forge.update(w);
   hud.setPrompt(promptText(w));
 }
 
@@ -99,12 +105,35 @@ function wakeInVillage(): void {
 }
 
 function enterWorld(): void {
-  shop.toggle(false);
+  closeTalk();
   scene.setWorld(world);
   region = null;
   showStats(world);
   showRegion(world, true);
   persist();
+}
+
+const isTalking = (): boolean => shop.isOpen || trainer.isOpen || forge.isOpen;
+
+function closeTalk(): void {
+  shop.toggle(false);
+  trainer.toggle(false);
+  forge.toggle(false);
+}
+
+/** The T key: talk to whoever is next to the hero, otherwise use a doorway. */
+function interact(): void {
+  if (isTalking()) {
+    closeTalk();
+    return;
+  }
+  const npc = nearestNpc(world);
+  if (npc?.kind === 'trainer') trainer.toggle(true);
+  else if (npc?.kind === 'blacksmith') forge.toggle(true);
+  else if (npc?.kind === 'guard') hud.log(i18n.t('log.guard'));
+  else if (npc && SHOP_STOCK[npc.kind]) shop.open(npc.kind);
+  else if (nearestExit(world)) scene.send({ type: 'travel' });
+  else hud.log(i18n.t('log.nothingNear'), true);
 }
 
 /** Turns a rule event into a line of text for the player. */
@@ -120,10 +149,38 @@ function showNotice(event: GameEvent): void {
       hud.log(i18n.t('log.noCharges'), true);
       return;
     case 'tradeDenied':
-      if (event.reason === 'far') hud.log(i18n.t('log.far'), true);
+      if (event.reason === 'far') hud.log(i18n.t('log.tooFar'), true);
       else if (event.reason === 'coins') hud.log(i18n.t('log.noCoins'), true);
       else if (event.reason === 'full') hud.log(i18n.t('log.noRoom'), true);
+      else if (event.reason === 'notSold') hud.log(i18n.t('log.notSold'), true);
       else hud.log(i18n.t('log.worthless'), true);
+      return;
+    case 'skillLearned':
+      hud.log(i18n.t('log.skillLearned', { skill: i18n.t(SKILL_NAME[event.id]) }));
+      return;
+    case 'learnDenied':
+      if (event.reason === 'far') hud.log(i18n.t('log.tooFar'), true);
+      else if (event.reason === 'coins') hud.log(i18n.t('log.noCoins'), true);
+      else hud.log(i18n.t('log.learnLevel'), true);
+      return;
+    case 'enchanted':
+      if (event.itemId !== 'coins') hud.log(i18n.t('log.enchanted', { item: itemName(i18n, event.itemId, event.level) }));
+      return;
+    case 'enchantFailed':
+      if (event.itemId !== 'coins') hud.log(i18n.t('log.enchantFailed', { item: itemName(i18n, event.itemId, event.level), crystals: event.crystals }), true);
+      return;
+    case 'enchantDenied':
+      if (event.reason === 'far') hud.log(i18n.t('log.tooFar'), true);
+      else if (event.reason === 'scroll') hud.log(i18n.t('log.noScroll'), true);
+      else hud.log(i18n.t('log.enchantMax'), true);
+      return;
+    case 'crystallized':
+      if (event.itemId !== 'coins') hud.log(i18n.t('log.crystallized', { item: itemName(i18n, event.itemId), crystals: event.crystals }));
+      return;
+    case 'crystallizeDenied':
+      if (event.reason === 'far') hud.log(i18n.t('log.tooFar'), true);
+      else if (event.reason === 'full') hud.log(i18n.t('log.noRoom'), true);
+      else hud.log(i18n.t('log.noCrystals'), true);
       return;
     case 'useDenied':
       if (event.reason === 'cooldown') hud.log(i18n.t('log.potionCooling'), true);
@@ -147,10 +204,11 @@ const scene = new DungeonScene(world, {
   onTick,
   onLevelUp: (level, unlocked) => {
     hud.log(i18n.t('log.levelUp', { level }));
-    for (const id of unlocked) hud.log(i18n.t('log.skillUnlocked', { skill: i18n.t(SKILL_NAME[id]) }));
+    for (const id of unlocked) hud.log(i18n.t('log.skillAvailable', { skill: i18n.t(SKILL_NAME[id]) }));
   },
   onSkillDenied: (id, reason) => {
     if (reason === 'mana') hud.log(i18n.t('log.noMana'), true);
+    else if (reason === 'unlearned') hud.log(i18n.t('log.skillUnlearned'), true);
     else if (reason === 'cooldown') hud.log(i18n.t('log.skillCooling'), true);
     else hud.log(i18n.t('log.skillLocked', { level: SKILLS[id].unlockLevel }), true);
   },
@@ -164,12 +222,7 @@ const scene = new DungeonScene(world, {
   },
   onInventoryFull: () => hud.log(i18n.t('log.full'), true),
   onToggleInventory: () => inventory.toggle(),
-  // One key for whatever is next to the hero: the merchant first, then an exit.
-  onInteract: () => {
-    if (shop.isOpen || isNearMerchant(world)) shop.toggle();
-    else if (nearestExit(world)) scene.send({ type: 'travel' });
-    else hud.log(i18n.t('log.nothingNear'), true);
-  },
+  onInteract: interact,
   onNotice: showNotice,
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
@@ -177,8 +230,14 @@ const scene = new DungeonScene(world, {
 
 const skillBar = new SkillBar(i18n, (id) => scene.useSkill(id, false));
 const quickBar = new QuickBar(i18n, (command) => scene.send(command));
-// The hero does not swing a weapon while talking to the merchant.
-const shop = new ShopPanel(i18n, (command) => scene.send(command), (open) => scene.setPeaceful(open));
+// The hero does not swing a weapon while talking to someone.
+const shop = new ShopPanel(i18n, (command) => scene.send(command), () => syncPeace());
+const trainer = new TrainerPanel(i18n, (command) => scene.send(command), () => syncPeace());
+const forge = new ForgePanel(i18n, (command) => scene.send(command), () => syncPeace());
+/** Called just before a window opens or closes, so the check is done a moment later. */
+function syncPeace(): void {
+  queueMicrotask(() => scene.setPeaceful(isTalking()));
+}
 const inventory = new InventoryPanel(i18n, (command) => scene.send(command));
 
 const hud = new Hud({
@@ -192,6 +251,8 @@ const hud = new Hud({
     hud.render();
     inventory.render(true);
     shop.render(true);
+    trainer.render(true);
+    forge.render(true);
     showStats(world);
   },
   onRespawn: () => scene.send({ type: 'respawn' }),

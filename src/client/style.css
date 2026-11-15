@@ -56,8 +56,8 @@ dialog form { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 16px
 #inventory { position: fixed; inset-block: 12px 84px; inset-inline-end: 12px; inline-size: min(420px, calc(100vw - 24px));
   max-width: none; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-#inventory h2, #shop h2 { margin: 0; font-size: 18px; }
-#inventory h3, #shop h3 { margin: 10px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+#inventory h2, .talk h2 { margin: 0; font-size: 18px; }
+#inventory h3, .talk h3 { margin: 10px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .item-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .item-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #1b1e26; border-radius: 8px; flex-wrap: wrap; }
 .slot-name { inline-size: 5.5em; flex: none; color: var(--muted); font-size: 13px; }
@@ -89,9 +89,13 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 13px; }
 button:disabled { opacity: 0.45; cursor: default; }
 
 /* Merchant */
-#shop { position: fixed; inset-block: 12px 84px; inset-inline-start: 424px; inline-size: min(420px, calc(100vw - 436px));
+.talk { position: fixed; inset-block: 12px 84px; inset-inline-start: 424px; inline-size: min(420px, calc(100vw - 436px));
   max-width: none; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-#shop-coins { color: #f2c94c; }
+#shop-coins, .coins { color: #f2c94c; }
+.forge-note { display: flex; flex-direction: column; flex: 1 1 9em; }
+.item-detail.warning { color: var(--warning); }
+.cell-enchant { position: absolute; inset-inline-start: 3px; inset-block-start: 1px; font-size: 12px; font-weight: 700; color: var(--accent);
+  text-shadow: 0 0 3px #000, 0 0 3px #000; pointer-events: none; }
 .item-price { color: #f2c94c; font-size: 13px; white-space: nowrap; }
 #prompt { position: fixed; inset-block-end: 84px; inset-inline: 0; margin-inline: auto; inline-size: fit-content;
   background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 12px; font-size: 14px; }

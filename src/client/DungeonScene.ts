@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
 import {
-  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Point, type SkillId, type World, type ZoneKind,
+  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Npc, type Point, type SkillId, type World, type ZoneKind,
   ITEMS, PLAYER_ATTACK_ARC, SKILLS, SKILL_IDS, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
   isAlive, isMoving, isRoad, isWalkable, regionAt, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
+import { NPC_LOOK } from './npcText';
 import { QUICK_KEYS } from './quickBar';
 import { SKILL_KEYS } from './skillText';
 import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
@@ -31,7 +32,7 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
 };
 const ATTACK_KEY = 'Space';
 const INVENTORY_KEY = 'KeyI';
-/** One key for whatever is next to the hero: the merchant, an exit. */
+/** One key for whatever is next to the hero: a villager, a doorway. */
 const INTERACT_KEY = 'KeyT';
 /** Keys that send one command when pressed. */
 const COMMAND_KEYS: Record<string, Command> = {
@@ -50,7 +51,7 @@ export interface SceneEvents {
   /** Called after every rule tick, for things that count down (skill cooldowns). */
   onTick(world: World): void;
   onLevelUp(level: number, unlocked: SkillId[]): void;
-  onSkillDenied(id: SkillId, reason: 'locked' | 'cooldown' | 'mana'): void;
+  onSkillDenied(id: SkillId, reason: 'locked' | 'unlearned' | 'cooldown' | 'mana'): void;
   onPickup(itemId: ItemId, count: number): void;
   onInventoryFull(): void;
   onToggleInventory(): void;
@@ -189,7 +190,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const object of this.mapObjects) object.destroy();
     this.cameras.main.setBackgroundColor(world.zone === 'dungeon' ? 0x12141a : 0x16201a);
     this.mapObjects = this.drawMap();
-    if (world.merchant) this.mapObjects.push(this.drawMerchant(world.merchant));
+    for (const npc of world.npcs) this.mapObjects.push(this.drawNpc(npc));
     for (const exit of world.exits) this.mapObjects.push(this.drawExit(exit.pos, EXIT_COLOR[exit.leadsTo]));
     for (const sprite of this.monsterSprites.values()) sprite.container.destroy();
     this.monsterSprites.clear();
@@ -421,11 +422,27 @@ export class DungeonScene extends Phaser.Scene {
       case 'sold':
         this.events_.onNotice(event);
         return true;
+      case 'skillLearned':
+      case 'enchanted':
+      case 'enchantFailed':
+      case 'crystallized':
+        this.events_.onNotice(event);
+        return true;
       case 'useDenied':
       case 'chargesEmpty':
       case 'tradeDenied':
+      case 'learnDenied':
+      case 'enchantDenied':
+      case 'crystallizeDenied':
         this.events_.onNotice(event);
         return false;
+      case 'guardStrike': {
+        const at = tileToScreen(event.pos.x, event.pos.y);
+        this.floatNumber(at.x, at.y - 40, event.damage, '#cfd3dc');
+        this.showGuardStrike(event.npcId, at);
+        if (event.died) this.showPuff(at.x, at.y - 10);
+        return false;
+      }
       case 'monsterHit': {
         const at = tileToScreen(event.pos.x, event.pos.y);
         this.floatNumber(at.x, at.y - 40, event.damage, '#ffe9a8');
@@ -631,18 +648,36 @@ export class DungeonScene extends Phaser.Scene {
     return g;
   }
 
-  private drawMerchant(merchant: Point): Phaser.GameObjects.Graphics {
-    const at = tileToScreen(merchant.x, merchant.y);
-    const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(merchant.x + merchant.y);
+  /** A villager: clothes in the colour of their trade and a sign above the head. Guards carry a spear instead. */
+  private drawNpc(npc: Npc): Phaser.GameObjects.Graphics {
+    const look = NPC_LOOK[npc.kind];
+    const at = tileToScreen(npc.pos.x, npc.pos.y);
+    const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(npc.pos.x + npc.pos.y);
     g.fillStyle(0x000000, 0.35).fillEllipse(0, 0, 32, 15);
-    g.fillStyle(0x3e7d5a).fillRoundedRect(-11, -36, 22, 34, { tl: 9, tr: 9, bl: 4, br: 4 });
-    g.fillStyle(0x2c5c42).fillRect(-11, -14, 22, 12);
+    g.fillStyle(look.clothes).fillRoundedRect(-11, -36, 22, 34, { tl: 9, tr: 9, bl: 4, br: 4 });
+    g.fillStyle(look.shade).fillRect(-11, -14, 22, 12);
     g.fillStyle(0xf0d2b0).fillCircle(0, -44, 8);
+    if (npc.kind === 'guard') {
+      g.fillStyle(look.shade).fillEllipse(0, -50, 20, 9); // helmet
+      g.lineStyle(3, 0x5a3f26, 1).lineBetween(15, -4, 15, -70);
+      g.fillStyle(look.sign).fillTriangle(11, -68, 19, -68, 15, -82);
+      return g;
+    }
     g.fillStyle(0x6b4a2a).fillEllipse(0, -51, 22, 8);
-    // A coin above his head marks him as someone to trade with.
-    g.fillStyle(0xb8862b).fillCircle(0, -66, 7);
-    g.fillStyle(0xf2c94c).fillCircle(0, -67, 6);
+    // The sign marks someone worth talking to.
+    g.fillStyle(0x12141a).fillCircle(0, -66, 8);
+    g.fillStyle(look.sign).fillCircle(0, -66, 6.5);
     return g;
+  }
+
+  /** A quick line from the guard to the monster he struck. */
+  private showGuardStrike(npcId: number, target: Point): void {
+    const guard = this.world.npcs.find((npc) => npc.id === npcId);
+    if (!guard) return;
+    const from = tileToScreen(guard.pos.x, guard.pos.y);
+    const line = this.add.graphics().setDepth(EFFECT_DEPTH);
+    line.lineStyle(4, 0xffffff, 0.8).lineBetween(from.x + 15, from.y - 60, target.x, target.y - 14);
+    this.tweens.add({ targets: line, alpha: 0, duration: 160, onComplete: () => line.destroy() });
   }
 
   private createLootSprite(loot: GroundLoot): Phaser.GameObjects.Graphics {
@@ -656,6 +691,9 @@ export class DungeonScene extends Phaser.Scene {
     } else if (def.kind === 'material') {
       g.fillStyle(0x8a6a45).fillRoundedRect(-7, -12, 14, 13, 4);
       g.fillStyle(0x5f4830).fillRect(-4, -14, 8, 3);
+    } else if (def.kind === 'scroll') {
+      g.fillStyle(0xe8dcc0).fillRoundedRect(-7, -14, 14, 14, 2);
+      g.fillStyle(def.grade === 'd' ? 0x5fa8ff : 0xb89f73).fillRect(-8, -15, 16, 3).fillRect(-8, -2, 16, 3);
     } else if (def.kind === 'consumable') {
       // A small flask: red for health, blue for mana, pale for charges.
       const color = def.effect.kind === 'heal' ? 0xd9534f : def.effect.kind === 'mana' ? 0x4f8fe0 : CHARGE_COLOR;

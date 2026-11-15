@@ -1,11 +1,11 @@
 import {
-  type Character, type EquipSlot, type ItemId, type ItemStack, type World, type ZoneKind,
-  EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
-  circleFree, createWorld, isItemId, isZoneKind, maxStackOf, newCharacter, xpToNextLevel,
+  type Character, type EquipSlot, type ItemId, type ItemStack, type SkillId, type World, type ZoneKind,
+  ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, SKILLS, SKILL_IDS, PLAYER_MAX_HP, PLAYER_RADIUS, STARTING_WEAPON,
+  circleFree, createWorld, isItemId, isSkillId, isZoneKind, maxStackOf, newCharacter, xpToNextLevel,
 } from '../sim';
 
 /** Increase when the saved shape changes, and add a migration in `parseSave`. */
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -36,10 +36,15 @@ interface SaveData {
   /** Whether weapon charges are switched on. */
   chargesOn: boolean;
   coins: number;
-  inventory: Array<{ id: ItemId; count: number }>;
+  /** `enchant` is the enchantment level of a piece of equipment; left out when zero. */
+  inventory: Array<{ id: ItemId; count: number; enchant?: number }>;
   equipment: Record<EquipSlot, ItemId | null>;
+  /** Enchantment level of each worn item. */
+  enchants: Record<EquipSlot, number>;
+  /** Skills learned from the trainer. */
+  skills: SkillId[];
   /** Items lying on the floor. */
-  loot: Array<{ id: ItemId; count: number; x: number; y: number }>;
+  loot: Array<{ id: ItemId; count: number; enchant?: number; x: number; y: number }>;
 }
 
 export type LoadResult =
@@ -85,9 +90,11 @@ export function serializeWorld(world: World): string {
     dungeonLevel: world.dungeonLevel,
     chargesOn: world.player.chargesOn,
     coins: world.player.coins,
-    inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count })),
+    inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count, ...(stack.enchant ? { enchant: stack.enchant } : {}) })),
     equipment: { ...world.player.equipment },
-    loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, x: loot.pos.x, y: loot.pos.y })),
+    enchants: { ...world.player.equipmentEnchant },
+    skills: [...world.player.skills],
+    loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, ...(loot.enchant ? { enchant: loot.enchant } : {}), x: loot.pos.x, y: loot.pos.y })),
   };
   return JSON.stringify(data);
 }
@@ -119,6 +126,17 @@ function migrate(data: Record<string, unknown>): Record<string, unknown> {
       ? { ...current, version: 8 }
       : { ...current, version: 8, zone: 'overworld', x: null, y: null, dead: [], loot: [] };
   }
+  // v9 added the trainer and enchanting. Heroes keep the skills they could
+  // already use, as if the trainer had taught them; nothing is enchanted yet.
+  if (current.version === 8) {
+    const level = typeof current.level === 'number' ? current.level : 1;
+    current = {
+      ...current,
+      version: 9,
+      skills: SKILL_IDS.filter((id) => SKILLS[id].unlockLevel <= level),
+      enchants: { weapon: 0, helmet: 0, armor: 0, boots: 0 },
+    };
+  }
   return current;
 }
 
@@ -133,11 +151,15 @@ function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
   if (!isRecord(value) || !isItemId(value.id) || !isInt(value.count) || value.count < 1) return null;
   const def = ITEMS[value.id];
   if (def.kind === 'currency' ? !allowCurrency : value.count > maxStackOf(value.id)) return null;
-  return { itemId: value.id, count: value.count };
+  const { enchant } = value;
+  if (enchant === undefined) return { itemId: value.id, count: value.count };
+  // Only equipment can be enchanted, and only so far.
+  if (def.kind !== 'equipment' || !isInt(enchant) || enchant < 1 || enchant > ENCHANT_MAX) return null;
+  return { itemId: value.id, count: value.count, enchant };
 }
 
 function parseCharacter(data: Record<string, unknown>): Character | null {
-  const { level, xp, coins, inventory, equipment } = data;
+  const { level, xp, coins, inventory, equipment, enchants, skills } = data;
   if (!isInt(level) || level < 1 || level > MAX_LEVEL) return null;
   // Experience at or above the next level's threshold cannot come from normal play.
   if (!isInt(xp) || xp < 0 || (level < MAX_LEVEL ? xp >= xpToNextLevel(level) : xp !== 0)) return null;
@@ -163,7 +185,18 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
     if (def.kind !== 'equipment' || def.slot !== slot) return null;
     worn[slot] = itemId;
   }
-  return { level, xp, coins, inventory: stacks, equipment: worn };
+  if (!isRecord(enchants) || Object.keys(enchants).some((slot) => !EQUIP_SLOTS.includes(slot as EquipSlot))) return null;
+  const equipmentEnchant = { weapon: 0, helmet: 0, armor: 0, boots: 0 };
+  for (const slot of EQUIP_SLOTS) {
+    const value = enchants[slot];
+    // An empty slot cannot be enchanted.
+    if (!isInt(value) || value < 0 || value > ENCHANT_MAX || (value > 0 && worn[slot] === null)) return null;
+    equipmentEnchant[slot] = value;
+  }
+  // A skill can only have been learned once, and not before its level.
+  if (!Array.isArray(skills) || new Set(skills).size !== skills.length) return null;
+  if (!skills.every((id) => isSkillId(id) && SKILLS[id].unlockLevel <= level)) return null;
+  return { level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, skills: skills as SkillId[] };
 }
 
 /** Saved data can be edited or corrupted, so every field is checked. */
@@ -216,7 +249,7 @@ export function parseSave(raw: string | null): LoadResult {
       if (!stack || !isRecord(entry) || !isFiniteNumber(entry.x) || !isFiniteNumber(entry.y)) return { status: 'damaged' };
       const pos = { x: entry.x, y: entry.y };
       if (!circleFree(world.map, pos, PLAYER_RADIUS)) return { status: 'damaged' };
-      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ignored: false });
+      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ignored: false, ...(stack.enchant ? { enchant: stack.enchant } : {}) });
       world.nextLootId += 1;
     }
 

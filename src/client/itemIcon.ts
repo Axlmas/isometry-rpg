@@ -34,6 +34,15 @@ const crystal = (color: string, light: string): string => `
   <path d="M16 3 L24 12 L18 29 L14 29 L8 12 Z" fill="${color}" ${OUTLINE}/>
   <path d="M16 3 L16 29 M8 12 L24 12" stroke="${light}" stroke-width="1" opacity="0.8"/>`;
 
+const scroll = (seal: string, mark: string): string => `
+  <path d="M8 6 H24 V26 H8 Z" fill="#e8dcc0" ${OUTLINE}/>
+  <path d="M6 5 H26 V8 H6 Z M6 24 H26 V27 H6 Z" fill="#b89f73" ${OUTLINE}/>
+  <path d="${mark}" stroke="#6e5a3a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <circle cx="21" cy="21" r="3.2" fill="${seal}" stroke="#12141a" stroke-width="1"/>`;
+/** The drawing on a scroll: a blade for weapons, a shield for armour. */
+const BLADE_MARK = 'M12 20 L19 11 M11 17 L14 20';
+const SHIELD_MARK = 'M12 11 H19 V15 Q19 19 15.5 20 Q12 19 12 15 Z';
+
 const IRON = '#b8bcc6';
 const IRON_DARK = '#7f8591';
 const LEATHER = '#a8743e';
@@ -67,6 +76,11 @@ const ICONS: Record<ItemId, string> = {
   manaPotion: flask('#4f8fe0'),
   chargePlain: crystal('#cfd3dc', '#ffffff'),
   chargeD: crystal('#5fa8ff', '#d6eaff'),
+  crystalD: `<path d="M8 14 L13 6 L21 6 L26 14 L16 28 Z" fill="#8f6bd6" ${OUTLINE}/><path d="M8 14 H26 M13 6 L16 14 L21 6 M16 14 V28" stroke="#d9c8ff" stroke-width="1" opacity="0.8"/>`,
+  scrollWeaponPlain: scroll('#cfd3dc', BLADE_MARK),
+  scrollArmorPlain: scroll('#cfd3dc', SHIELD_MARK),
+  scrollWeaponD: scroll('#5fa8ff', BLADE_MARK),
+  scrollArmorD: scroll('#5fa8ff', SHIELD_MARK),
 };
 
 /** An element showing the item's picture. Purely decorative: the name is given in text elsewhere. */
@@ -76,6 +90,6 @@ export function itemIcon(itemId: ItemId): HTMLElement {
   holder.setAttribute('aria-hidden', 'true');
   holder.innerHTML = `<svg viewBox="0 0 32 32" width="100%" height="100%">${ICONS[itemId]}</svg>`;
   const def = ITEMS[itemId];
-  if (def.kind === 'equipment') holder.dataset.grade = def.grade;
+  if (def.kind === 'equipment' || def.kind === 'scroll') holder.dataset.grade = def.grade;
   return holder;
 }
