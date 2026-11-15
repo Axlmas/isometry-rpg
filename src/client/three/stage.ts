@@ -42,6 +42,12 @@ export class Stage {
   private pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
   private readonly maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   private frameTimes: number[] = [];
+  /** The first seconds compile shaders and upload textures: they say nothing about the machine. */
+  private warmUp = 3;
+  /** Highest resolution allowed: once a level proved too slow, the screen never goes back to it. */
+  private ceiling = this.maxPixelRatio;
+  /** Seconds-long stretches in a row with time to spare; a step up needs several. */
+  private calm = 0;
   distance = 22;
 
   constructor(private readonly container: HTMLElement) {
@@ -148,22 +154,38 @@ export class Stage {
   }
 
   render(dt = 0): void {
+    // A new resolution is applied before drawing. Resizing the canvas clears it: done after
+    // drawing, the player would see one empty, dark frame.
+    this.adapt(dt);
     this.renderer.info.reset();
     this.composer.render();
-    this.adapt(dt);
   }
 
-  /** Steps the resolution down when the last second ran below ~45 fps, up when above ~58. */
+  /**
+   * Steps the resolution down when frames run below ~45 a second, and up again only after
+   * several calm stretches and never back to a level that was too slow, so it settles
+   * instead of seesawing.
+   */
   private adapt(dt: number): void {
     if (dt <= 0 || document.hidden) return;
+    if (this.warmUp > 0) {
+      this.warmUp -= dt;
+      return;
+    }
     this.frameTimes.push(dt);
-    if (this.frameTimes.length < 60) return;
+    if (this.frameTimes.length < 90) return;
     const sorted = [...this.frameTimes].sort((a, b) => a - b);
     const typical = sorted[Math.floor(sorted.length * 0.6)]!;
     this.frameTimes = [];
     let next = this.pixelRatio;
-    if (typical > 1 / 45) next = Math.max(0.6, this.pixelRatio - 0.15);
-    else if (typical < 1 / 58) next = Math.min(this.maxPixelRatio, this.pixelRatio + 0.1);
+    if (typical > 1 / 45) {
+      this.calm = 0;
+      this.ceiling = Math.min(this.ceiling, this.pixelRatio - 0.05);
+      next = Math.max(0.6, this.pixelRatio - 0.15);
+    } else if (typical < 1 / 58 && ++this.calm >= 3) {
+      this.calm = 0;
+      next = Math.min(this.ceiling, this.pixelRatio + 0.1);
+    }
     if (Math.abs(next - this.pixelRatio) < 0.01) return;
     this.pixelRatio = next;
     this.renderer.setPixelRatio(next);
