@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { type Library, type WeaponId, WEAPONS, fitToHeight, placeholder, prepareModel } from './assets';
+import { IMPACT_AT, PoseBuilder, combatMoves } from './poses';
 
 // Characters in the 3D world. They hold no game rules: the scene tells them where they
 // are, how fast they move and what just happened, and they pick the animation.
@@ -26,6 +27,10 @@ const strideCache = new WeakMap<THREE.AnimationClip, number>();
 function measureStride(holder: THREE.Object3D, model: THREE.Object3D, clip: THREE.AnimationClip, feet: THREE.Object3D[]): number {
   const cached = strideCache.get(clip);
   if (cached !== undefined) return cached;
+  // Playing the clip moves the bones; put them back afterwards, so whoever looks at the
+  // skeleton next (weapon sockets, the pose builder) still finds the rest pose.
+  const rest: [THREE.Object3D, THREE.Vector3, THREE.Quaternion, THREE.Vector3][] = [];
+  model.traverse((o) => rest.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]));
   const mixer = new THREE.AnimationMixer(model);
   const action = mixer.clipAction(clip);
   action.play();
@@ -39,6 +44,12 @@ function measureStride(holder: THREE.Object3D, model: THREE.Object3D, clip: THRE
   }
   action.stop();
   mixer.uncacheRoot(model);
+  for (const [o, p, q, sc] of rest) {
+    o.position.copy(p);
+    o.quaternion.copy(q);
+    o.scale.copy(sc);
+  }
+  holder.updateMatrixWorld(true);
   const speeds: number[] = [];
   for (const pts of tracks) {
     let lo = Infinity;
@@ -61,38 +72,43 @@ function measureStride(holder: THREE.Object3D, model: THREE.Object3D, clip: THRE
   return speed;
 }
 
-/** A model with a skeleton and its clips. */
-class Rig {
-  readonly mixer: THREE.AnimationMixer;
-  private readonly actions = new Map<string, THREE.AnimationAction>();
-  private current?: THREE.AnimationAction;
-  currentName = '';
+/** Bones that belong to the legs: they follow walking and running while the arms are busy. */
+const LOWER_BODY = /(Hips|UpLeg|Leg|Foot|Toe)/;
 
-  constructor(readonly model: THREE.Object3D, clips: THREE.AnimationClip[]) {
-    this.mixer = new THREE.AnimationMixer(model);
-    for (const clip of clips) this.actions.set(clip.name, this.mixer.clipAction(clip));
-  }
+function boneOf(track: THREE.KeyframeTrack): string {
+  return track.name.slice(0, track.name.lastIndexOf('.'));
+}
+
+/** Splits a full-body clip into `name@lower` (hips and legs) and `name@upper` (the rest). */
+function splitClip(clip: THREE.AnimationClip): THREE.AnimationClip[] {
+  const lower = clip.tracks.filter((t) => LOWER_BODY.test(boneOf(t)));
+  const upper = clip.tracks.filter((t) => !LOWER_BODY.test(boneOf(t)));
+  return [new THREE.AnimationClip(`${clip.name}@lower`, clip.duration, lower), new THREE.AnimationClip(`${clip.name}@upper`, clip.duration, upper)];
+}
+
+/** One half of the body playing one clip at a time, cross-fading between them. */
+class Layer {
+  current?: THREE.AnimationAction;
+  name = '';
+
+  constructor(private readonly actions: Map<string, THREE.AnimationAction>, private readonly half: '@lower' | '@upper') {}
 
   has(name: string): boolean {
-    return this.actions.has(name);
+    return this.actions.has(name + this.half);
   }
 
-  clip(name: string): THREE.AnimationClip | undefined {
-    return this.actions.get(name)?.getClip();
-  }
-
-  /** Cross-fades to a clip. A one-off clip plays once and holds its last frame. */
-  play(name: string, options: { fade?: number; once?: boolean; restart?: boolean } = {}): THREE.AnimationAction | undefined {
-    const next = this.actions.get(name);
+  play(name: string, options: { fade?: number; once?: boolean; restart?: boolean; at?: number } = {}): THREE.AnimationAction | undefined {
+    const next = this.actions.get(name + this.half);
     if (!next) return undefined;
     if (next === this.current && !options.restart) return next;
     next.reset();
     next.setLoop(options.once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
     next.clampWhenFinished = !!options.once;
+    if (options.at !== undefined) next.time = options.at;
     next.setEffectiveWeight(1).play();
-    if (this.current && this.current !== next) next.crossFadeFrom(this.current, options.fade ?? FADE, false);
+    if (this.current && this.current !== next) next.crossFadeFrom(this.current, Math.max(0.01, options.fade ?? FADE), false);
     this.current = next;
-    this.currentName = name;
+    this.name = name;
     return next;
   }
 
@@ -104,9 +120,12 @@ class Rig {
 
 interface Curl {
   bone: THREE.Object3D;
-  axis: THREE.Vector3;
-  angle: number;
+  /** The bend, ready to apply in the parent's space. */
+  turn: THREE.Quaternion;
 }
+
+/** Scratch rotation reused every frame: making new ones per bone per frame makes the garbage collector stutter. */
+const SCRATCH = new THREE.Quaternion();
 
 /** How far each finger joint bends to close a hand around a grip (radians). */
 const GRIP_CURL = [1.1, 1.35, 0.9];
@@ -147,29 +166,43 @@ export interface Motion {
   face: THREE.Vector3 | null;
 }
 
+export type WeaponKind = 'sword' | 'bow' | 'staff' | 'none';
+
+const WEAPON_KIND: Record<WeaponId, WeaponKind> = { sword: 'sword', axe: 'sword', bow: 'bow', staff: 'staff' };
+
 /**
  * A humanoid on a Mixamo-named skeleton: the hero, a villager, a ghoul. Weapons go
  * into hand sockets made in the T-pose, so any weapon fits any humanoid.
+ *
+ * The body plays in two layers. The legs walk, run or stand; the arms and torso
+ * either follow the legs or do something of their own: a blow, a shot, a spell, a
+ * flinch, a fighting stance. So the hero can strike while still on the move.
  */
 export class Humanoid {
   readonly object = new THREE.Group();
   private readonly pose: THREE.Group;
-  private readonly rig: Rig | null;
+  private readonly mixer: THREE.AnimationMixer | null = null;
+  private readonly lower: Layer | null = null;
+  private readonly upper: Layer | null = null;
   private readonly sockets: Record<'right' | 'left', THREE.Group> = { right: new THREE.Group(), left: new THREE.Group() };
   private readonly grips: Record<'right' | 'left', Curl[]> = { right: [], left: [] };
   private readonly held: Record<'right' | 'left', THREE.Object3D | null> = { right: null, left: null };
   private readonly strides = new Map<string, number>();
   private readonly materials: THREE.MeshStandardMaterial[] = [];
-  private heading = 0;
-  private oneShot = false;
+  private weapon: WeaponKind = 'none';
+  /** Where the character faces, radians around the vertical. */
+  heading = 0;
+  private moving = false;
+  private combat = false;
   private dead = false;
   private flash = 0;
+  /** Alternates the two blows of a sword, like the left-right rhythm of an auto-attack. */
+  private combo = 0;
 
   constructor(gltf: GLTF | undefined, height: number, private readonly lib: Library, standIn = '#8a6a4a', tint?: THREE.ColorRepresentation) {
     if (!gltf) {
       this.pose = placeholder(height, standIn);
       this.object.add(this.pose);
-      this.rig = null;
       return;
     }
     const model = cloneSkinned(gltf.scene);
@@ -189,14 +222,24 @@ export class Humanoid {
     this.object.updateMatrixWorld(true);
     this.mountSocket(model, 'right');
     this.mountSocket(model, 'left');
-    this.rig = new Rig(model, gltf.animations);
 
+    // Strides are measured on the whole clips, before they are split into halves.
     const feet = ['Left', 'Right'].map((s) => findBone(model, new RegExp(`${s}ToeBase$`)) ?? findBone(model, new RegExp(`${s}Foot$`))).filter((b): b is THREE.Object3D => !!b);
     for (const name of ['walk', 'run']) {
-      const clip = this.rig.clip(name);
+      const clip = gltf.animations.find((c) => c.name === name);
       if (clip && feet.length === 2) this.strides.set(name, measureStride(this.pose, model, clip, feet));
     }
-    this.rig.play('idle');
+
+    const clips = gltf.animations.flatMap(splitClip);
+    const builder = new PoseBuilder(model, this.object, this.sockets, gltf.animations.find((c) => c.name === 'idle'));
+    if (builder.ok) clips.push(...combatMoves(builder));
+    this.mixer = new THREE.AnimationMixer(model);
+    const actions = new Map<string, THREE.AnimationAction>();
+    for (const clip of clips) actions.set(clip.name, this.mixer.clipAction(clip));
+    this.lower = new Layer(actions, '@lower');
+    this.upper = new Layer(actions, '@upper');
+    this.lower.play('idle');
+    this.upper.play('idle');
   }
 
   get position(): THREE.Vector3 {
@@ -215,6 +258,7 @@ export class Humanoid {
       if (old) this.sockets[side].remove(old);
       this.held[side] = null;
     }
+    this.weapon = id ? WEAPON_KIND[id] : 'none';
     if (!id) return;
     const weapon = this.lib.weapon(id);
     if (!weapon) return;
@@ -223,35 +267,69 @@ export class Humanoid {
     this.held[side] = weapon;
   }
 
-  /** A one-off action: a blow, a shot, a flinch. Ignored while dead. */
-  act(name: 'slash' | 'shoot' | 'hurt'): void {
-    if (this.dead || !this.rig) return;
-    if (name === 'hurt' && this.oneShot && this.rig.currentName !== 'hurt') {
-      // A flinch does not cut a blow short; it shows as a flash only.
-      this.flash = 1;
-      return;
-    }
-    const clip = this.rig.has(name) ? name : name === 'shoot' ? 'slash' : null;
-    if (!clip) return;
-    const action = this.rig.play(clip, { once: true, restart: true, fade: 0.08 });
-    if (action) action.timeScale = name === 'hurt' ? 1.3 : 1.5;
-    this.oneShot = true;
-    if (name === 'hurt') this.flash = 1;
+  /** In a fight the character stands ready, weapon up, instead of idling. */
+  setCombat(on: boolean): void {
+    this.combat = on;
+  }
+
+  /**
+   * A blow, a shot or a spell, depending on the weapon. `impactIn` is how many seconds
+   * from now it lands: the clip is timed so the weapon meets the target then.
+   */
+  attack(impactIn = 0.1): void {
+    const upper = this.upper;
+    if (this.dead || !upper) return;
+    let name = this.weapon === 'sword' || this.weapon === 'none' ? `atk-${this.weapon}-${this.combo % 2 === 0 ? 'a' : 'b'}` : `atk-${this.weapon}`;
+    if (!upper.has(name)) name = 'slash';
+    this.combo += 1;
+    const action = upper.play(name, { once: true, restart: true, fade: 0.05 });
+    if (action) action.timeScale = name === 'slash' ? 1.5 : IMPACT_AT / Math.max(0.05, impactIn);
+  }
+
+  /** Holds the upper body still at one moment of a clip; for checking poses in tests. */
+  freeze(name: string, time: number): void {
+    const action = this.upper?.play(name, { once: true, restart: true, fade: 0.01 });
+    if (!action) return;
+    action.time = time;
+    action.timeScale = 0;
+    this.frozen = true;
+  }
+
+  /** True while `freeze` holds the pose; normal play resumes after `revive`. */
+  private frozen = false;
+
+  /** A flinch of the upper body. It does not cut a blow short; then it shows as a flash only. */
+  hurt(): void {
+    this.flash = 1;
+    const upper = this.upper;
+    if (this.dead || !upper || upper.busy()) return;
+    const action = upper.play('hurt', { once: true, restart: true, fade: 0.06 });
+    if (action) action.timeScale = 1.4;
   }
 
   /** Lies down for good (until `revive`). */
   die(): void {
     if (this.dead) return;
     this.dead = true;
-    this.oneShot = false;
-    if (this.rig?.has('fall')) this.rig.play('fall', { once: true, fade: 0.1 });
-    else this.pose.rotation.z = Math.PI / 2;
+    if (this.lower?.has('fall')) {
+      this.lower.play('fall', { once: true, fade: 0.1 });
+      this.upper!.play('fall', { once: true, fade: 0.1 });
+    } else {
+      this.pose.rotation.z = Math.PI / 2;
+    }
   }
 
   revive(): void {
     this.dead = false;
+    this.frozen = false;
     this.pose.rotation.z = 0;
-    this.rig?.play('idle', { fade: 0.05 });
+    this.lower?.play('idle', { fade: 0.05 });
+    this.upper?.play('idle', { fade: 0.05 });
+  }
+
+  /** Off screen: only keep its place and facing, skip the animation work. */
+  place(motion: Motion): void {
+    this.object.position.copy(motion.position);
   }
 
   /** Places the character for this frame and picks the animation from its motion. */
@@ -259,33 +337,48 @@ export class Humanoid {
     this.object.position.copy(motion.position);
     const moving = motion.speed > 0.25;
     if (!this.dead) {
-      let want: number | null = null;
-      if (motion.face && motion.face.lengthSq() > 1e-6) want = Math.atan2(motion.face.x, motion.face.z);
-      if (want !== null) this.heading = turnToward(this.heading, want, 14, dt);
+      if (motion.face && motion.face.lengthSq() > 1e-6) {
+        const want = Math.atan2(motion.face.x, motion.face.z);
+        // Setting off, the character turns at once, as in classic MMORPGs; on the way, smoothly.
+        this.heading = moving && !this.moving ? want : turnToward(this.heading, want, 18, dt);
+      }
       this.object.rotation.y = this.heading;
     }
+    const started = moving && !this.moving;
+    this.moving = moving;
 
-    const rig = this.rig;
-    if (rig) {
-      if (this.oneShot && !rig.busy()) this.oneShot = false;
-      if (!this.dead && !this.oneShot) {
+    const { mixer, lower, upper } = this;
+    if (mixer && lower && upper) {
+      if (!this.dead) {
+        let legs = 'idle';
+        let rate = 1;
         if (moving) {
           // Walk when slow, run when fast; play exactly fast enough that the feet stay put.
           const walk = this.strides.get('walk') ?? 0;
           const run = this.strides.get('run') ?? 0;
-          const name = run > 0 && (walk === 0 || motion.speed > walk * 1.35) ? 'run' : 'walk';
-          const action = rig.play(name);
-          const stride = this.strides.get(name) ?? 0;
-          if (action) action.timeScale = stride > 0.1 ? THREE.MathUtils.clamp(motion.speed / stride, 0.4, 2.6) : 1;
-        } else {
-          rig.play('idle');
+          legs = run > 0 && (walk === 0 || motion.speed > walk * 1.35) ? 'run' : 'walk';
+          const stride = this.strides.get(legs) ?? 0;
+          rate = stride > 0.1 ? THREE.MathUtils.clamp(motion.speed / stride, 0.4, 2.6) : 1;
+        }
+        // Setting off, the legs start running almost at once: no glide in a standing pose.
+        const lowerAction = lower.play(legs, { fade: started ? 0.04 : 0.12 });
+        if (lowerAction) lowerAction.timeScale = rate;
+        if (!upper.busy() && !this.frozen) {
+          const stance = `stance-${this.weapon}`;
+          if (!moving && this.combat && upper.has(stance)) {
+            upper.play(stance, { fade: 0.2 });
+          } else {
+            // The arms follow the legs, in step with them.
+            const upperAction = upper.play(legs, { fade: started ? 0.04 : 0.15, at: lowerAction?.time });
+            if (upperAction) upperAction.timeScale = rate;
+          }
         }
       }
-      rig.mixer.update(dt);
+      mixer.update(dt);
       // The generated clips hold the hands open; close them around what they hold.
       for (const side of ['right', 'left'] as const) {
         if (!this.held[side]) continue;
-        for (const c of this.grips[side]) c.bone.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(c.axis, c.angle));
+        for (const c of this.grips[side]) c.bone.quaternion.premultiply(c.turn);
       }
     } else if (moving) {
       this.pose.position.y = Math.abs(Math.sin(performance.now() / 90)) * 0.06;
@@ -321,7 +414,7 @@ export class Humanoid {
         const bone = findBone(model, new RegExp(`${Side}Hand${finger}${i + 1}$`));
         if (!bone?.parent) return;
         const inv = bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
-        this.grips[side].push({ bone, axis: forward.clone().applyQuaternion(inv).normalize(), angle });
+        this.grips[side].push({ bone, turn: new THREE.Quaternion().setFromAxisAngle(forward.clone().applyQuaternion(inv).normalize(), angle) });
       });
     }
   }
@@ -451,6 +544,11 @@ export class Beast {
     return this.dying;
   }
 
+  /** Off screen: only keep its place, skip the animation work. */
+  place(motion: Motion): void {
+    this.object.position.copy(motion.position);
+  }
+
   update(dt: number, motion: Motion, hunting: boolean, prey: THREE.Vector3 | null): void {
     this.time += dt;
     this.object.position.copy(motion.position);
@@ -510,7 +608,7 @@ export class Beast {
     const freq = hunting ? 9 : 2.2;
     const amp = this.dying >= 0 ? 0 : hunting ? 0.35 : 0.18 + Math.min(speed, 1) * 0.1;
     this.tail.forEach((d, i) => {
-      d.bone.quaternion.copy(d.bind).premultiply(new THREE.Quaternion().setFromAxisAngle(d.up, Math.sin(t * freq - i * 0.7) * amp));
+      d.bone.quaternion.copy(d.bind).premultiply(SCRATCH.setFromAxisAngle(d.up, Math.sin(t * freq - i * 0.7) * amp));
     });
     if (this.head) {
       let want = 0;
@@ -522,11 +620,11 @@ export class Beast {
       this.lookYaw += (want - this.lookYaw) * (1 - Math.exp(-dt * 8));
       const nod = this.lunge > 0.6 ? Math.sin(((this.lunge - 0.6) / 0.4) * Math.PI) * 0.35 : 0;
       this.head.bone.quaternion.copy(this.head.bind)
-        .premultiply(new THREE.Quaternion().setFromAxisAngle(this.head.up, this.lookYaw))
-        .premultiply(new THREE.Quaternion().setFromAxisAngle(this.head.side, nod));
+        .premultiply(SCRATCH.setFromAxisAngle(this.head.up, this.lookYaw))
+        .premultiply(SCRATCH.setFromAxisAngle(this.head.side, nod));
     }
     if (this.spine && speed < 0.2 && this.dying < 0) {
-      this.spine.bone.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(this.spine.side, Math.sin(t * 2.4) * 0.025));
+      this.spine.bone.quaternion.premultiply(SCRATCH.setFromAxisAngle(this.spine.side, Math.sin(t * 2.4) * 0.025));
     }
     this.flash = Math.max(0, this.flash - dt * 4);
     for (const m of this.materials) {

@@ -35,11 +35,18 @@ export class Stage {
   private readonly focus = new THREE.Vector3();
   private shakeLeft = 0;
   private shakeStrength = 0;
+  /**
+   * Render resolution as a share of the screen's pixels. It adapts to the machine: down
+   * a step when frames take too long, up a step when there is time to spare.
+   */
+  private pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+  private readonly maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  private frameTimes: number[] = [];
   distance = 22;
 
   constructor(private readonly container: HTMLElement) {
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(this.pixelRatio);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -108,8 +115,9 @@ export class Stage {
 
   /** Keeps the camera, the sun's shadow box and the torch on a point (the hero). */
   follow(point: THREE.Vector3, dt: number): void {
-    const k = dt <= 0 ? 1 : 1 - Math.exp(-dt * 7);
-    this.focus.lerp(point, k);
+    // Locked on the hero, as in classic MMORPGs: a trailing camera makes every start look
+    // like a lurch forward. Positions are already smoothed between rule ticks.
+    this.focus.copy(point);
     const d = this.distance;
     const f = this.focus;
     this.camera.position.set(
@@ -139,9 +147,32 @@ export class Stage {
     this.shakeStrength = strength;
   }
 
-  render(): void {
+  render(dt = 0): void {
     this.renderer.info.reset();
     this.composer.render();
+    this.adapt(dt);
+  }
+
+  /** Steps the resolution down when the last second ran below ~45 fps, up when above ~58. */
+  private adapt(dt: number): void {
+    if (dt <= 0 || document.hidden) return;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < 60) return;
+    const sorted = [...this.frameTimes].sort((a, b) => a - b);
+    const typical = sorted[Math.floor(sorted.length * 0.6)]!;
+    this.frameTimes = [];
+    let next = this.pixelRatio;
+    if (typical > 1 / 45) next = Math.max(0.6, this.pixelRatio - 0.15);
+    else if (typical < 1 / 58) next = Math.min(this.maxPixelRatio, this.pixelRatio + 0.1);
+    if (Math.abs(next - this.pixelRatio) < 0.01) return;
+    this.pixelRatio = next;
+    this.renderer.setPixelRatio(next);
+    this.resize();
+  }
+
+  /** Current render resolution share, for the stats readout. */
+  get resolution(): number {
+    return this.pixelRatio;
   }
 
   /** Screen pixel position of a point in the world, or null when it is behind the camera. */

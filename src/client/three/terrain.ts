@@ -564,13 +564,15 @@ function buildGrass(world: World, keep: <T extends { dispose(): void }>(t: T) =>
   // Normals pointing up light the blades like the ground below them, so they blend in.
   tuft.setAttribute('normal', new THREE.Float32BufferAttribute(verts.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
 
-  const byRegion = new Map<RegionId, THREE.Matrix4[]>();
+  // Grouped by region (colour) and by chunk, so grass off screen is not drawn.
+  const byRegion = new Map<string, THREE.Matrix4[]>();
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       if (tileAt(map, x, y) !== TILE_FLOOR || isRoad(zone, x, y)) continue;
       const region = regionAt(zone, { x, y }).id;
       if (REGION_LOOK[region].walls !== 'trees') continue;
-      const list = byRegion.get(region) ?? [];
+      const key = `${region}|${Math.floor(x / CHUNK)},${Math.floor(y / CHUNK)}`;
+      const list = byRegion.get(key) ?? [];
       const count = 3 + Math.floor(hash(x, y, 51) * 3);
       for (let i = 0; i < count; i++) {
         const s = 0.6 + hash(x, y, 60 + i) * 0.9;
@@ -580,14 +582,20 @@ function buildGrass(world: World, keep: <T extends { dispose(): void }>(t: T) =>
           new THREE.Vector3(s, s * (0.7 + hash(x, y, 100 + i) * 0.6), s),
         ));
       }
-      byRegion.set(region, list);
+      byRegion.set(key, list);
     }
   }
   const meshes: THREE.InstancedMesh[] = [];
-  for (const [region, list] of byRegion) {
-    const f = REGION_LOOK[region].floor;
-    const color = new THREE.Color(`rgb(${clamp(f[0] * 1.05)}, ${clamp(f[1] * 1.15)}, ${clamp(f[2] * 0.8)})`);
-    const mat = keep(new THREE.MeshStandardMaterial({ color, roughness: 1, side: THREE.DoubleSide }));
+  const materials = new Map<RegionId, THREE.MeshStandardMaterial>();
+  for (const [key, list] of byRegion) {
+    const region = key.split('|')[0] as RegionId;
+    let mat = materials.get(region);
+    if (!mat) {
+      const f = REGION_LOOK[region].floor;
+      const color = new THREE.Color(`rgb(${clamp(f[0] * 1.05)}, ${clamp(f[1] * 1.15)}, ${clamp(f[2] * 0.8)})`);
+      mat = keep(new THREE.MeshStandardMaterial({ color, roughness: 1, side: THREE.DoubleSide }));
+      materials.set(region, mat);
+    }
     const mesh = new THREE.InstancedMesh(tuft, mat, list.length);
     list.forEach((m, i) => mesh.setMatrixAt(i, m));
     mesh.receiveShadow = true;

@@ -36,6 +36,9 @@ const base = import.meta.env.BASE_URL;
 const url = (file: string): string => `${base}models/${file}`;
 
 export const CHARACTERS = {
+  // The hero's three looks, by the armour on his body: none, ungraded, graded.
+  'hero-t0': { url: url('hero-t0.glb'), height: 1.8, clips: { hurt: [0, 1.4] } },
+  'hero-t1': { url: url('hero-t1.glb'), height: 1.8, clips: { hurt: [0, 1.4] } },
   hero: {
     url: url('hero.glb'), height: 1.82, extraClips: url('hero-extra.glb'),
     clips: { slash: [0.6, 2.6], hurt: [0, 1.4] },

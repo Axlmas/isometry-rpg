@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type NpcKind, type Point, type Quality, type SkillId, type World, type ZoneKind,
-  ITEMS, MONSTER_ATTACK_WINDUP, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, SKILLS, TICK_MS,
-  classSkills, isAlive, isMoving, isUnique, isWalkable, step, weaponInHand,
+  ITEMS, MONSTER_ATTACK_WINDUP, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, SKILLS, TICK_MS,
+  type Player, classSkills, isAlive, isMoving, isUnique, isWalkable, step, weaponInHand,
 } from '../../sim';
 import { QUICK_KEYS } from '../hotbar';
 import { QUALITY_COLOR } from '../itemText';
@@ -31,6 +31,22 @@ const ELDER_SCALE = 1.35;
 const KIND_SCALE: Partial<Record<Monster['kind'], number>> = { wolfPup: 0.72, tusker: 1.22 };
 /** Which model draws each kind of monster. */
 const MONSTER_MODEL: Record<Monster['kind'], CharacterId> = { wolfPup: 'wolf', wolf: 'wolf', boar: 'boar', tusker: 'boar', grunt: 'ghoul' };
+/** Which of the hero's looks each villager wears. */
+const NPC_MODEL: Record<NpcKind, CharacterId> = {
+  guard: 'hero', trainer: 'hero', blacksmith: 'hero-t1', hunter: 'hero-t1', alchemist: 'hero-t0', outfitter: 'hero-t1',
+};
+
+/**
+ * The hero's look follows the armour on his body, as in classic MMORPGs: a ragged
+ * recruit without it, leather when it has no grade, plate from grade D up.
+ */
+function heroModel(player: Player): CharacterId {
+  const id = player.equipment.armor;
+  const def = id ? ITEMS[id] : null;
+  if (!def || def.kind !== 'equipment') return 'hero-t0';
+  return def.grade === 'none' ? 'hero-t1' : 'hero';
+}
+
 const NPC_WEAPON: Record<NpcKind, WeaponId | null> = {
   guard: 'sword', trainer: 'sword', blacksmith: 'axe', hunter: 'bow', alchemist: 'staff', outfitter: null,
 };
@@ -85,6 +101,10 @@ interface MonsterView {
   windup: number;
   /** Seconds since it fell; negative while alive. */
   deadFor: number;
+  /** Reused every frame. */
+  motion: Motion;
+  face: THREE.Vector3;
+  sphere: THREE.Sphere;
 }
 
 /** Rules' tile position to metres on the ground. */
@@ -101,6 +121,7 @@ export class WorldScene {
   private terrain: Terrain | null = null;
   private hero: Humanoid | null = null;
   private heroWeapon: WeaponId | null | undefined = undefined;
+  private heroLook: CharacterId | null = null;
   private readonly monsters = new Map<number, MonsterView>();
   private readonly corpses: MonsterView[] = [];
   private npcViews: { kind: NpcKind; pos: Point; actor: Humanoid }[] = [];
@@ -128,6 +149,11 @@ export class WorldScene {
   private shownTarget = '';
   private readonly screen = { x: 0, y: 0 };
   private time = 0;
+  /** What the camera sees this frame, for skipping work on things off screen. */
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
+  /** When the hero last struck or was struck: he stays in a fighting stance for a while. */
+  private lastFight = -1e9;
 
   constructor(container: HTMLElement, world: World, events: SceneEvents) {
     this.world = world;
@@ -181,7 +207,7 @@ export class WorldScene {
     this.corpses.length = 0;
     for (const npc of this.npcViews) scene.remove(npc.actor.object);
     this.npcViews = world.npcs.map((npc) => {
-      const actor = new Humanoid(this.lib!.character('hero'), 1.78, this.lib!, '#8a7a6a', blend(NPC_LOOK[npc.kind].clothes));
+      const actor = new Humanoid(this.lib!.character(NPC_MODEL[npc.kind]) ?? this.lib!.character('hero'), 1.78, this.lib!, '#8a7a6a', blend(NPC_LOOK[npc.kind].clothes));
       actor.setWeapon(NPC_WEAPON[npc.kind]);
       actor.update(0, { position: at(npc.pos), speed: 0, face: new THREE.Vector3(1, 0, 1) });
       scene.add(actor.object);
@@ -193,16 +219,14 @@ export class WorldScene {
     for (const view of this.missileViews.values()) scene.remove(view);
     this.missileViews.clear();
 
-    if (!this.hero) {
-      this.hero = new Humanoid(this.lib.character('hero'), CHARACTERS.hero.height, this.lib);
-      scene.add(this.hero.object);
-    }
     this.heroWeapon = undefined;
-    this.syncHeroWeapon();
-    if (isAlive(world)) this.hero.revive();
-    else this.hero.die();
+    this.heroLook = null;
+    this.syncHeroLook();
+    const hero = this.hero!;
+    if (isAlive(world)) hero.revive();
+    else hero.die();
     const start = at(world.player.pos);
-    this.hero.update(0, { position: start, speed: 0, face: null });
+    hero.update(0, { position: start, speed: 0, face: null });
     this.syncMonsters(1, 0);
     this.syncLoot(0);
     this.stage.snapTo(start);
@@ -269,6 +293,10 @@ export class WorldScene {
         }
       }
       const alpha = this.paused ? 1 : this.accumulator / TICK_MS;
+      const camera = this.stage.camera;
+      camera.updateMatrixWorld();
+      this.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      this.frustum.setFromProjectionMatrix(this.viewProjection);
       this.syncHero(alpha, dt);
       this.syncMonsters(alpha, dt);
       this.syncNpcs(dt);
@@ -280,7 +308,7 @@ export class WorldScene {
       this.terrain?.update(this.time);
     }
     this.effects.update(dt);
-    this.stage.render();
+    this.stage.render(dt);
     this.showStats(dt);
   }
 
@@ -303,7 +331,11 @@ export class WorldScene {
             const ok = this.stage.project(p, this.screen);
             return ok ? { id: v.id, x: this.screen.x, y: this.screen.y, d: v.actor.object.position.distanceTo(this.hero!.position) } : null;
           }).filter(Boolean),
+          hero: () => this.hero,
+          send: (command: Command) => this.pending.push(command),
+          bag: () => this.world.player.inventory.map((stack) => stack?.itemId ?? null),
           state: () => ({
+            look: this.heroLook, armor: this.world.player.equipment.armor,
             locked: this.lockedId, target: this.targetId, hero: this.world.player.pos, hp: this.world.player.hp,
             xp: this.world.player.xp, level: this.world.player.level, kills: this.world.player.kills,
             lockedHp: this.lockedMonster()?.hp ?? null, cooldown: this.world.player.attackCooldown,
@@ -315,7 +347,7 @@ export class WorldScene {
     if (!this.statsEl || dt <= 0) return;
     this.fps += (1 / dt - this.fps) * 0.05;
     const info = this.stage.renderer.info.render;
-    this.statsEl.textContent = `${this.fps.toFixed(0)} fps · ${(info.triangles / 1000).toFixed(0)}k tris · ${info.calls} calls`;
+    this.statsEl.textContent = `${this.fps.toFixed(0)} fps · ${(info.triangles / 1000).toFixed(0)}k tris · ${info.calls} calls · res ${this.stage.resolution.toFixed(2)}`;
   }
 
   private syncHero(alpha: number, dt: number): void {
@@ -328,6 +360,7 @@ export class WorldScene {
     let face: THREE.Vector3 | null = null;
     if (player.pendingAttack || player.attackCooldown > 0) face = new THREE.Vector3(player.facing.x, 0, player.facing.y);
     else if (step > 1e-4) face = new THREE.Vector3(player.pos.x - this.previous.x, 0, player.pos.y - this.previous.y);
+    hero.setCombat(this.lockedId !== null || performance.now() - this.lastFight < 4000);
     hero.update(dt, { position: new THREE.Vector3(x * TILE, 0, y * TILE), speed, face });
   }
 
@@ -341,6 +374,27 @@ export class WorldScene {
     SEE_THROUGH.uSeeCenter.value.set((ndc.x * 0.5 + 0.5) * size.x, (ndc.y * 0.5 + 0.5) * size.y);
     SEE_THROUGH.uSeeRadius.value = size.y * 0.16;
     SEE_THROUGH.uSeeDepth.value = -view.z;
+  }
+
+  /** Swaps the hero's model when the armour on his body changes his look. */
+  private syncHeroLook(): void {
+    const lib = this.lib;
+    if (!lib) return;
+    const look = heroModel(this.world.player);
+    if (look !== this.heroLook || !this.hero) {
+      this.heroLook = look;
+      const old = this.hero;
+      const hero = new Humanoid(lib.character(look) ?? lib.character('hero'), CHARACTERS.hero.height, lib);
+      if (old) {
+        hero.object.position.copy(old.position);
+        hero.heading = old.heading;
+        this.stage.scene.remove(old.object);
+      }
+      this.stage.scene.add(hero.object);
+      this.hero = hero;
+      this.heroWeapon = undefined;
+    }
+    this.syncHeroWeapon();
   }
 
   private syncHeroWeapon(): void {
@@ -375,18 +429,26 @@ export class WorldScene {
         continue;
       }
       const stepLen = Math.hypot(monster.pos.x - view.previous.x, monster.pos.y - view.previous.y);
-      const motion: Motion = {
-        position: new THREE.Vector3(x * TILE, 0, y * TILE),
-        speed: (stepLen * TILE * 1000) / TICK_MS,
-        face: monster.aggro
-          ? new THREE.Vector3(this.world.player.pos.x - x, 0, this.world.player.pos.y - y)
-          : stepLen > 1e-4 ? new THREE.Vector3(monster.pos.x - view.previous.x, 0, monster.pos.y - view.previous.y) : null,
-      };
+      // One motion object per monster, reused every frame: no garbage, no collector stutter.
+      const motion = view.motion;
+      motion.position.set(x * TILE, 0, y * TILE);
+      motion.speed = (stepLen * TILE * 1000) / TICK_MS;
+      if (monster.aggro) motion.face = view.face.set(this.world.player.pos.x - x, 0, this.world.player.pos.y - y);
+      else if (stepLen > 1e-4) motion.face = view.face.set(monster.pos.x - view.previous.x, 0, monster.pos.y - view.previous.y);
+      else motion.face = null;
+      // Off screen it only keeps its place; its animation would not be seen.
+      view.sphere.center.copy(motion.position);
+      view.sphere.radius = 2.5 * view.actor.object.scale.x;
+      if (!this.frustum.intersectsSphere(view.sphere)) {
+        view.actor.place(motion);
+        view.windup = monster.windup;
+        continue;
+      }
       if (view.actor instanceof Beast) {
         view.actor.windup(monster.windup > 0 ? 1 - monster.windup / MONSTER_ATTACK_WINDUP : 0);
         view.actor.update(dt, motion, monster.aggro, prey);
       } else {
-        if (monster.windup > 0 && view.windup === 0) view.actor.act('slash');
+        if (monster.windup > 0 && view.windup === 0) view.actor.attack((monster.windup * TICK_MS) / 1000);
         view.actor.update(dt, motion);
       }
       view.windup = monster.windup;
@@ -428,7 +490,10 @@ export class WorldScene {
     }
     actor.object.scale.setScalar(scale);
     actor.object.position.copy(at(monster.pos));
-    return { id: monster.id, actor, previous: { ...monster.pos }, windup: 0, deadFor: -1 };
+    return {
+      id: monster.id, actor, previous: { ...monster.pos }, windup: 0, deadFor: -1,
+      motion: { position: new THREE.Vector3(), speed: 0, face: null }, face: new THREE.Vector3(), sphere: new THREE.Sphere(),
+    };
   }
 
   private syncNpcs(dt: number): void {
@@ -754,7 +819,7 @@ export class WorldScene {
     this.wasMoving = moving;
     if (this.world.player.revision !== this.savedRevision) {
       this.savedRevision = this.world.player.revision;
-      this.syncHeroWeapon();
+      this.syncHeroLook();
       checkpoint = true;
     }
     this.reportStats();
@@ -781,13 +846,13 @@ export class WorldScene {
     const dir = (p: Point) => new THREE.Vector3(p.x, 0, p.y);
     switch (event.type) {
       case 'playerSwing':
-        this.effects.swing(heroAt, dir(event.dir), PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE * TILE, event.charged ? CHARGE_COLOR : 0xffffff);
-        hero.act('slash');
+        this.lastFight = performance.now();
+        hero.attack(PLAYER_ATTACK_WINDUP * TICK_MS / 1000);
         sound.swing();
         if (event.charged) this.effects.burst(this.heroChest(), CHARGE_COLOR, 14, 2.5);
         return false;
       case 'playerShot':
-        hero.act('shoot');
+        hero.attack(PLAYER_ATTACK_WINDUP * TICK_MS / 1000);
         sound.shot(this.world.player.cls === 'mage');
         if (event.charged) this.effects.burst(this.heroChest(), CHARGE_COLOR, 14, 2.5);
         return false;
@@ -801,13 +866,13 @@ export class WorldScene {
         const { effect } = SKILLS[event.id];
         if (effect.kind === 'nova') {
           this.effects.swing(heroAt, dir(event.dir), Math.PI * 2, effect.radius * TILE, 0x9fe0ff);
-          hero.act('slash');
+          hero.attack(PLAYER_ATTACK_WINDUP * TICK_MS / 1000);
         }
         if (effect.kind === 'haste') this.effects.ring(heroAt, 0x9ff0d0);
-        if (effect.kind === 'shot') hero.act('shoot');
+        if (effect.kind === 'shot') hero.attack(PLAYER_ATTACK_WINDUP * TICK_MS / 1000);
         if (effect.kind === 'strike') {
           this.effects.swing(heroAt, dir(event.dir), effect.arc, effect.range * TILE, event.charged ? CHARGE_COLOR : 0xffb347);
-          hero.act('slash');
+          hero.attack(PLAYER_ATTACK_WINDUP * TICK_MS / 1000);
         }
         return false;
       }
@@ -871,7 +936,7 @@ export class WorldScene {
         if (event.died) sound.kill();
         if (view) {
           if (view.actor instanceof Beast) view.actor.hit();
-          else view.actor.act('hurt');
+          else view.actor.hurt();
         }
         this.targetId = event.id;
         this.targetUntil = performance.now() + TARGET_MEMORY_MS;
@@ -883,7 +948,8 @@ export class WorldScene {
         sound.hurt();
         this.effects.burst(this.heroChest(), 0x9c1f1a, 9, 2.4);
         this.effects.float(this.events.formatNumber(event.damage), this.heroChest().setY(2.1), '#ff7a6b');
-        hero.act('hurt');
+        hero.hurt();
+        this.lastFight = performance.now();
         this.stage.shake(0.12, 0.18);
         return false;
       case 'playerDied':
