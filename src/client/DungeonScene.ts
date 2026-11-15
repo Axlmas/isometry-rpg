@@ -16,6 +16,8 @@ import { drawHeroFigure, drawMonsterFigure, drawNpcFigure, drawShadow, drawWeapo
 import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
 
 const WALL_HEIGHT = 30;
+/** Houses stand taller than the people who live in them. */
+const HOUSE_HEIGHT = 78;
 const HALF_W = TILE_WIDTH / 2;
 const HALF_H = TILE_HEIGHT / 2;
 /** While the pointer is held down, the destination follows it at this interval. */
@@ -1145,8 +1147,8 @@ export class DungeonScene extends Phaser.Scene {
     if (npc.kind !== 'guard') {
       // A sign over the head marks someone worth talking to.
       const sign = this.add.graphics();
-      sign.fillStyle(0x14110d).fillCircle(0, -64, 5.5);
-      sign.fillStyle(NPC_LOOK[npc.kind].sign).fillCircle(0, -64, 4.2);
+      sign.fillStyle(0x14110d).fillCircle(0, -88, 5.5);
+      sign.fillStyle(NPC_LOOK[npc.kind].sign).fillCircle(0, -88, 4.2);
       parts.push(sign);
     }
     return this.add.container(at.x, at.y, parts).setDepth(depth);
@@ -1441,17 +1443,17 @@ export class DungeonScene extends Phaser.Scene {
       }
     });
     for (const [key, lit] of [['house', false], ['houseLit', true]] as const) {
-      block(key, 44, (g, c) => {
+      block(key, HOUSE_HEIGHT, (g, c) => {
         // Plastered walls with dark timbers under a tiled roof.
-        this.drawBlock(g, c, 44, 0xb9a887, 0x94836a, 0x9c4636);
+        this.drawBlock(g, c, HOUSE_HEIGHT, 0xb9a887, 0x94836a, 0x9c4636);
         g.lineStyle(2, 0x4a3524, 0.9);
-        g.lineBetween(c.x - HALF_W, c.y - 44, c.x - HALF_W, c.y).lineBetween(c.x, c.y - 44 + HALF_H, c.x, c.y + HALF_H).lineBetween(c.x + HALF_W, c.y - 44, c.x + HALF_W, c.y);
-        g.lineBetween(c.x - HALF_W, c.y - 22, c.x, c.y - 22 + HALF_H).lineBetween(c.x, c.y - 22 + HALF_H, c.x + HALF_W, c.y - 22);
+        g.lineBetween(c.x - HALF_W, c.y - HOUSE_HEIGHT, c.x - HALF_W, c.y).lineBetween(c.x, c.y - HOUSE_HEIGHT + HALF_H, c.x, c.y + HALF_H).lineBetween(c.x + HALF_W, c.y - HOUSE_HEIGHT, c.x + HALF_W, c.y);
+        g.lineBetween(c.x - HALF_W, c.y - HOUSE_HEIGHT / 2, c.x, c.y - HOUSE_HEIGHT / 2 + HALF_H).lineBetween(c.x, c.y - HOUSE_HEIGHT / 2 + HALF_H, c.x + HALF_W, c.y - HOUSE_HEIGHT / 2);
         // Rows of tiles on the roof.
         g.lineStyle(1, 0x6e2d22, 0.8);
         for (let i = 1; i < 4; i++) {
           const k = i / 4;
-          g.lineBetween(c.x - HALF_W + HALF_W * k, c.y - 44 - HALF_H * k, c.x + HALF_W * k, c.y - 44 + HALF_H - HALF_H * k);
+          g.lineBetween(c.x - HALF_W + HALF_W * k, c.y - HOUSE_HEIGHT - HALF_H * k, c.x + HALF_W * k, c.y - HOUSE_HEIGHT + HALF_H - HALF_H * k);
         }
         if (lit) {
           // A window with a warm light on the left wall.

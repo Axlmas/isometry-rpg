@@ -36,8 +36,9 @@ export function heroLook(armor: ItemId | null): number {
 /** Monsters that have a sheet; the others are still drawn from shapes. The young wolf is a small wolf. */
 export const MONSTER_SHEET: Partial<Record<MonsterKind, string>> = { wolfPup: 'wolf', wolf: 'wolf', boar: 'boar', tusker: 'tusker', grunt: 'ghoul' };
 /** How large each sheet is shown, in screen pixels per frame pixel. */
-const SHEET_SCALE: Record<string, number> = { wolf: 0.42, boar: 0.5, tusker: 0.6, ghoul: 0.56 };
-const DEFAULT_SCALE = 0.56;
+const SHEET_SCALE: Record<string, number> = { wolf: 0.38, boar: 0.44, tusker: 0.52, ghoul: 0.56 };
+/** Villagers are single pictures that fill their frame; heroes leave room in theirs for a swung weapon. */
+const scaleOf = (sheet: string): number => SHEET_SCALE[sheet] ?? (sheet.startsWith('npc-') ? 0.44 : 0.48);
 export const NPC_SHEET: Record<NpcKind, string> = {
   alchemist: 'npc-alchemist',
   outfitter: 'npc-outfitter',
@@ -99,7 +100,7 @@ export function hasSheet(scene: Phaser.Scene, sheet: string | undefined): sheet 
 /** A sprite of the given sheet, standing on its feet at (0, 0). */
 export function createCharacter(scene: Phaser.Scene, sheet: string): Phaser.GameObjects.Sprite {
   const meta = metaOf(scene, sheet) as SheetMeta;
-  return scene.add.sprite(0, 0, sheet, 0).setOrigin(meta.anchor.x, meta.anchor.y).setScale(SHEET_SCALE[sheet] ?? DEFAULT_SCALE);
+  return scene.add.sprite(0, 0, sheet, 0).setOrigin(meta.anchor.x, meta.anchor.y).setScale(scaleOf(sheet));
 }
 
 /**
