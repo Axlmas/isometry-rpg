@@ -21,9 +21,7 @@
 | `src/client/three/` | 3D-отрисовка на Three.js: сцена, свет, модели, анимации |
 | `public/models/` | 3D-модели, сгенерированные в Tripo и сжатые для браузера |
 | `tools/tripo/` | Скрипт для API Tripo и журнал всех запросов (`tasks.jsonl`) |
-| `tools/models/` | Сжатие моделей для веба |
-| `public/sprites/` | Спрайт-листы персонажей (2D-версия, уходят) |
-| `tools/sprites/` | Инструмент, который рендерит спрайты из 3D-моделей |
+| `tools/models/` | Сжатие моделей для веба и просмотрщик моделей |
 | `docs/ASSETS.md` | Откуда взяты ассеты и под какой лицензией |
 | `.github/workflows/ci.yml` | Проверки при каждом push |
 | `.github/workflows/deploy.yml` | Автодеплой на GitHub Pages: `main` и превью всех веток |

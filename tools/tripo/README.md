@@ -49,3 +49,8 @@ tools/tripo/tripo.sh run generation/image-to-model \
 | Wolf (walk) | 10 | 110 | 25 | 10 | 155 |
 | Weapon (each) | 10 | 110 | — | — | 120 |
 | Prop (each) | 10 | 110 | — | — | 120 |
+| Boar (walk) | 10 | 110 | 25 | 10 | 155 |
+| Mine ghoul (6 animations) | 10 | 110 | 25 | 60 | 205 |
+| Hero: death and shot clips | — | — | — | 20 | 20 |
+
+All 16 models so far: 1 930 credits.
