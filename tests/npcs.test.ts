@@ -315,10 +315,7 @@ describe('tempering at the blacksmith', () => {
     step(world, [{ type: 'unequip', slot: 'weapon' }]);
     step(world, [{ type: 'drop', index: 1 }]);
     expect(world.loot[0]).toMatchObject({ itemId: 'trainingSword', enchant: 2 });
-    step(world, [{ type: 'moveTo', x: world.player.pos.x + 3, y: world.player.pos.y + 1 }]);
-    for (let i = 0; i < 40; i++) step(world);
-    step(world, [{ type: 'moveTo', x: world.loot[0]!.pos.x, y: world.loot[0]!.pos.y }]);
-    for (let i = 0; i < 40; i++) step(world);
+    step(world, [{ type: 'pickUp', id: world.loot[0]!.id }]);
     expect(world.player.inventory).toContainEqual({ itemId: 'trainingSword', count: 1, enchant: 2 });
   });
 

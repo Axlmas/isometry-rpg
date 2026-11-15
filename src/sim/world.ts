@@ -99,8 +99,6 @@ export interface GroundLoot {
   /** Quality and properties of a piece of equipment; left out for a plain one. */
   mods?: ItemMods;
   pos: Point;
-  /** True while the hero should not pick it up: just dropped, or no room for it. */
-  ignored: boolean;
 }
 
 export interface Monster {
@@ -236,6 +234,8 @@ export type Command =
   | { type: 'unequip'; slot: EquipSlot }
   /** Drop an inventory slot on the floor. */
   | { type: 'drop'; index: number }
+  /** Pick up one thing from the floor. Only works within reach: the hero walks up first. */
+  | { type: 'pickUp'; id: number }
   /** Use an item from the bag: drink a potion or read a recipe. */
   | { type: 'use'; itemId: ItemId }
   /** Switch weapon charges on or off. */

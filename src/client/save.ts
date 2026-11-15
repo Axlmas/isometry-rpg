@@ -253,7 +253,7 @@ export function parseSave(raw: string | null, dev = false): LoadResult {
       if (!stack || !isRecord(entry) || !isFiniteNumber(entry.x) || !isFiniteNumber(entry.y)) return { status: 'damaged' };
       const pos = { x: entry.x, y: entry.y };
       if (!circleFree(world.map, pos, PLAYER_RADIUS)) return { status: 'damaged' };
-      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ignored: false, ...(stack.enchant ? { enchant: stack.enchant } : {}), ...(stack.mods ? { mods: stack.mods } : {}) });
+      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ...(stack.enchant ? { enchant: stack.enchant } : {}), ...(stack.mods ? { mods: stack.mods } : {}) });
       world.nextLootId += 1;
     }
 

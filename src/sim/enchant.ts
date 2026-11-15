@@ -90,7 +90,7 @@ export function enchant(world: World, target: ItemTarget): void {
   const crystals = crystalsFor(item.itemId);
   // Crystals that do not fit in the bag fall at the hero's feet rather than vanish.
   const left = crystals > 0 ? addItem(player, 'crystalD', crystals) : 0;
-  if (left > 0) world.loot.push({ id: world.nextLootId++, itemId: 'crystalD', count: left, pos: { ...player.pos }, ignored: true });
+  if (left > 0) world.loot.push({ id: world.nextLootId++, itemId: 'crystalD', count: left, pos: { ...player.pos } });
   world.events.push({ type: 'enchantFailed', itemId: item.itemId, level: item.level, crystals });
 }
 

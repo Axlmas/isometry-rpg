@@ -46,7 +46,7 @@ function dropMonsterLoot(world: World, monster: Monster): void {
         const mods = def.kind === 'equipment' ? rollMods(rng, def, monster.elder) : undefined;
         world.rngState = rng.state;
         // Placed slightly apart from the coins so every drop is visible.
-        dropLoot(world, itemId, count, { x: monster.pos.x + 0.35 - i * 0.7, y: monster.pos.y + 0.1 }, false, 0, mods);
+        dropLoot(world, itemId, count, { x: monster.pos.x + 0.35 - i * 0.7, y: monster.pos.y + 0.1 }, 0, mods);
         break;
       }
       chance -= entry.chance;
@@ -61,7 +61,7 @@ function dropMonsterLoot(world: World, monster: Monster): void {
     const rng = createRng(world.rngState);
     const mods = def.kind === 'equipment' ? rollMods(rng, def, true) : undefined;
     world.rngState = rng.state;
-    dropLoot(world, rare.itemId, 1, { x: monster.pos.x, y: monster.pos.y + 0.45 }, false, 0, mods);
+    dropLoot(world, rare.itemId, 1, { x: monster.pos.x, y: monster.pos.y + 0.45 }, 0, mods);
   }
 }
 

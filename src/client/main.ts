@@ -302,6 +302,11 @@ const scene = new WorldScene(document.getElementById('game') as HTMLElement, wor
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),
   npcName: (kind) => i18n.t(NPC_NAME[kind]),
+  lootName: (loot) => {
+    if (loot.itemId === 'coins') return i18n.t('loot.coins', { count: loot.count });
+    const name = itemName(i18n, loot.itemId, loot.enchant ?? 0);
+    return loot.count > 1 ? i18n.t('loot.stack', { item: name, count: loot.count }) : name;
+  },
 });
 
 const hotbar = new Hotbar(i18n, (slot) => scene.useSkillSlot(slot, false), (command) => scene.send(command));

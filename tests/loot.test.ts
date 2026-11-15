@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ItemId, type World, EQUIP_SLOTS, JEWELLERY_SLOTS, NO_GEAR, INVENTORY_SLOTS, ITEMS, MONSTER_DAMAGE,
   PLAYER_MAX_HP, STARTING_WEAPON, UNARMED_DAMAGE, addItem, characterOf, createWorld, droppableEquipment,
-  isItemId, playerDamage, playerDefense, step,
+  LOOT_PICKUP_RADIUS, isItemId, playerDamage, playerDefense, step,
 } from '../src/sim';
 
 function openWorld(seed = 5): World {
@@ -18,8 +18,10 @@ function openWorld(seed = 5): World {
 const fillBag = (world: World) => {
   while (world.player.inventory.length < INVENTORY_SLOTS) world.player.inventory.push({ itemId: 'ironSword', count: 1 });
 };
-const putLoot = (world: World, itemId: ItemId, count: number, dx: number) => {
-  world.loot.push({ id: world.nextLootId++, itemId, count, pos: { x: world.spawn.x + dx, y: world.spawn.y }, ignored: false });
+const putLoot = (world: World, itemId: ItemId, count: number, dx: number): number => {
+  const id = world.nextLootId++;
+  world.loot.push({ id, itemId, count, pos: { x: world.spawn.x + dx, y: world.spawn.y } });
+  return id;
 };
 
 describe('item catalogue', () => {
@@ -59,22 +61,35 @@ describe('a new hero', () => {
 });
 
 describe('picking up', () => {
-  it('collects loot the hero walks over and reports it', () => {
+  it('leaves loot alone when the hero walks over it: things are picked up only on purpose', () => {
     const world = openWorld();
     putLoot(world, 'coins', 7, 2);
-    putLoot(world, 'leather', 2, 3);
-    step(world);
-    expect(world.player.coins).toBe(0); // too far
     step(world, [{ type: 'moveTo', x: world.spawn.x + 3, y: world.spawn.y }]);
-    const picked: unknown[] = [];
-    for (let i = 0; i < 60; i++) {
-      step(world);
-      picked.push(...world.events.filter((e) => e.type === 'itemPicked'));
-    }
+    for (let i = 0; i < 60; i++) step(world);
+    expect(world.player.coins).toBe(0);
+    expect(world.loot).toHaveLength(1);
+  });
+
+  it('picks up one thing on command when it is within reach, and reports it', () => {
+    const world = openWorld();
+    const coins = putLoot(world, 'coins', 7, 0.5);
+    const leather = putLoot(world, 'leather', 2, 0.8);
+    step(world, [{ type: 'pickUp', id: coins }]);
+    expect(world.events).toContainEqual({ type: 'itemPicked', itemId: 'coins', count: 7 });
     expect(world.player.coins).toBe(7);
+    expect(world.loot.map((l) => l.id)).toEqual([leather]);
+    step(world, [{ type: 'pickUp', id: leather }]);
     expect(world.player.inventory).toEqual([{ itemId: 'leather', count: 2 }]);
     expect(world.loot).toEqual([]);
-    expect(picked).toEqual([{ type: 'itemPicked', itemId: 'coins', count: 7 }, { type: 'itemPicked', itemId: 'leather', count: 2 }]);
+  });
+
+  it('cannot pick up what lies out of reach, or what is not there', () => {
+    const world = openWorld();
+    const far = putLoot(world, 'coins', 7, LOOT_PICKUP_RADIUS + 0.5);
+    step(world, [{ type: 'pickUp', id: far }, { type: 'pickUp', id: 999 }, { type: 'pickUp', id: Number.NaN }]);
+    expect(world.player.coins).toBe(0);
+    expect(world.loot).toHaveLength(1);
+    expect(world.events.some((e) => e.type === 'itemPicked')).toBe(false);
   });
 
   it('stacks materials and keeps equipment one per slot', () => {
@@ -89,25 +104,19 @@ describe('picking up', () => {
     ]);
   });
 
-  it('leaves loot on the floor when the bag is full, says so once, and still takes coins', () => {
+  it('leaves loot on the floor when the bag is full and says so, but still takes coins', () => {
     const world = openWorld();
     fillBag(world);
-    putLoot(world, 'ironHelm', 1, 0.2);
-    putLoot(world, 'coins', 5, 0.2);
-    let notices = 0;
-    for (let i = 0; i < 40; i++) {
-      step(world);
-      notices += world.events.filter((e) => e.type === 'inventoryFull').length;
-    }
-    expect(notices).toBe(1);
+    const helm = putLoot(world, 'ironHelm', 1, 0.2);
+    const coins = putLoot(world, 'coins', 5, 0.2);
+    step(world, [{ type: 'pickUp', id: helm }]);
+    expect(world.events).toContainEqual({ type: 'inventoryFull' });
+    step(world, [{ type: 'pickUp', id: coins }]);
     expect(world.player.coins).toBe(5);
     expect(world.loot.map((l) => l.itemId)).toEqual(['ironHelm']);
-    // After making room and walking away and back, it is picked up.
+    // After making room it can be picked up.
     step(world, [{ type: 'drop', index: 0 }]);
-    step(world, [{ type: 'moveTo', x: world.spawn.x + 3, y: world.spawn.y }]);
-    for (let i = 0; i < 40; i++) step(world);
-    step(world, [{ type: 'moveTo', x: world.spawn.x + 0.2, y: world.spawn.y }]);
-    for (let i = 0; i < 40; i++) step(world);
+    step(world, [{ type: 'pickUp', id: helm }]);
     expect(world.player.inventory.some((s) => s.itemId === 'ironHelm')).toBe(true);
   });
 
@@ -115,8 +124,8 @@ describe('picking up', () => {
     const world = openWorld();
     fillBag(world);
     world.player.inventory[0] = { itemId: 'bone', count: 98 };
-    putLoot(world, 'bone', 2, 0.1);
-    step(world);
+    const bone = putLoot(world, 'bone', 2, 0.1);
+    step(world, [{ type: 'pickUp', id: bone }]);
     expect(world.player.inventory[0]).toEqual({ itemId: 'bone', count: 99 });
     expect(world.loot[0]?.count).toBe(1);
   });
@@ -124,8 +133,8 @@ describe('picking up', () => {
   it('does not let a dead hero pick things up', () => {
     const world = openWorld();
     world.player.hp = 0;
-    putLoot(world, 'coins', 5, 0);
-    step(world);
+    const coins = putLoot(world, 'coins', 5, 0);
+    step(world, [{ type: 'pickUp', id: coins }]);
     expect(world.player.coins).toBe(0);
   });
 });

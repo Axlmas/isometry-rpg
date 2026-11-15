@@ -6,7 +6,7 @@
   "hud.monsters": "{count} is the number of living monsters in the dungeon. The =0 form is a short victory message.",
   "death.title": "Heading of the defeat screen. Solemn, not jokey.",
   "death.respawn": "Button that brings the hero back to life at the dungeon entrance.",
-  "hud.hint": "Controls summary. WASD, I, T, F, Q, E, R, Esc and Space are physical keys and stay as they are in every language.",
+  "hud.hint": "Controls summary. WASD, I, T, F, Z, Q, E, R, Esc and Space are physical keys and stay as they are in every language.",
   "inventory.stack": "An item name followed by how many there are, for example 'Leather × 3'.",
   "inventory.better": "Short tag next to a bag item that has higher numbers than the one currently worn.",
   "grade.d": "Equipment tier. The letter D is part of the game's terminology and is not translated.",
@@ -54,5 +54,7 @@
   "monster.elder": "{name} is a monster's name (wolf, boar, ghoul). An elder is a rare, much stronger one. All monster names are masculine in Russian; keep the adjective agreeing with them.",
   "hud.xpPercent": "{percent} is an already formatted number with two decimals, for example 12.34.",
   "grade.dShort": "A one-letter badge in the corner of an item's cell.",
-  "quality.common": "Item quality tiers, from worst to best: common, fine, rare, epic. Shown after the item's kind, like 'Helmet · D-grade · Rare'."
+  "quality.common": "Item quality tiers, from worst to best: common, fine, rare, epic. Shown after the item's kind, like 'Helmet · D-grade · Rare'.",
+  "loot.coins": "Name over coins lying on the ground: just the amount.",
+  "loot.stack": "Name over a stack lying on the ground: the item name and how many."
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type NpcKind, type Point, type Quality, type SkillId, type World, type ZoneKind,
-  ITEMS, MONSTER_ATTACK_WINDUP, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, SKILLS, TICK_MS,
+  ITEMS, LOOT_PICKUP_RADIUS, MONSTER_ATTACK_WINDUP, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, SKILLS, TICK_MS,
   type Player, classSkills, isAlive, isMoving, isUnique, isWalkable, step, weaponInHand,
 } from '../../sim';
 import { QUICK_KEYS } from '../hotbar';
@@ -12,6 +12,7 @@ import { sound, unlockSound } from '../sound';
 import { type CharacterId, type WeaponId, CHARACTERS, Library, TILE } from './assets';
 import { Beast, Humanoid, type Motion, setOpacity } from './actors';
 import { Effects, disposeTree } from './effects';
+import { Follower } from './follow';
 import { Stage } from './stage';
 import { SEE_THROUGH, type Terrain, buildTerrain } from './terrain';
 
@@ -63,6 +64,12 @@ const ATTACK_KEY = 'Space';
 const CANCEL_KEY = 'Escape';
 const INVENTORY_KEY = 'KeyI';
 const INTERACT_KEY = 'KeyT';
+/** Picks up the nearest thing on the ground. */
+const PICKUP_KEY = 'KeyZ';
+/** How far around the hero Z looks for something to pick up, in tiles. */
+const PICKUP_SEARCH = 8;
+/** A thing on the ground counts as under the cursor within this many pixels. */
+const LOOT_PICK_PX = 30;
 const COMMAND_KEYS: Record<string, Command> = {
   [QUICK_KEYS.healthPotion]: { type: 'use', itemId: 'healthPotion' },
   [QUICK_KEYS.manaPotion]: { type: 'use', itemId: 'manaPotion' },
@@ -84,6 +91,8 @@ export interface SceneEvents {
   onToggleInventory(): void;
   onInteract(): void;
   onTarget(monster: Monster | null): void;
+  /** What a thing on the ground is called, shown over it: "Leather ×2", "7 coins". */
+  lootName(loot: GroundLoot): string;
   onReady(): void;
   onTravel(to: ZoneKind): void;
   onRespawn(): void;
@@ -146,6 +155,9 @@ export class WorldScene {
   private targetUntil = 0;
   private lockedId: number | null = null;
   private lockTimer = 0;
+  /** The thing on the ground the hero was told to pick up: he walks to it, then takes it. */
+  private pickId: number | null = null;
+  private pickTimer = 0;
   private shownTarget = '';
   private readonly screen = { x: 0, y: 0 };
   private time = 0;
@@ -154,6 +166,11 @@ export class WorldScene {
   private readonly viewProjection = new THREE.Matrix4();
   /** When the hero last struck or was struck: he stays in a fighting stance for a while. */
   private lastFight = -1e9;
+  /** The hero's drawn body, which gathers speed instead of jumping to it. */
+  private readonly heroBody = new Follower();
+  private readonly heroTarget = new THREE.Vector3();
+  private readonly heroRuleVel = new THREE.Vector3();
+  private readonly heroFace = new THREE.Vector3();
 
   constructor(container: HTMLElement, world: World, events: SceneEvents) {
     this.world = world;
@@ -190,6 +207,7 @@ export class WorldScene {
     this.heldKeys.clear();
     this.lockedId = null;
     this.targetId = null;
+    this.pickId = null;
     this.effects.clear();
     this.effects.clearLabels();
 
@@ -226,6 +244,7 @@ export class WorldScene {
     if (isAlive(world)) hero.revive();
     else hero.die();
     const start = at(world.player.pos);
+    this.heroBody.reset(start);
     hero.update(0, { position: start, speed: 0, face: null });
     this.syncMonsters(1, 0);
     this.syncLoot(0);
@@ -334,6 +353,10 @@ export class WorldScene {
           hero: () => this.hero,
           send: (command: Command) => this.pending.push(command),
           bag: () => this.world.player.inventory.map((stack) => stack?.itemId ?? null),
+          loot: () => this.world.loot.map((l) => {
+            const ok = this.stage.project(at(l.pos).setY(0.15), this.screen);
+            return { id: l.id, itemId: l.itemId, x: ok ? this.screen.x : null, y: ok ? this.screen.y : null };
+          }),
           state: () => ({
             look: this.heroLook, armor: this.world.player.equipment.armor,
             locked: this.lockedId, target: this.targetId, hero: this.world.player.pos, hp: this.world.player.hp,
@@ -350,18 +373,29 @@ export class WorldScene {
     this.statsEl.textContent = `${this.fps.toFixed(0)} fps · ${(info.triangles / 1000).toFixed(0)}k tris · ${info.calls} calls · res ${this.stage.resolution.toFixed(2)}`;
   }
 
+  /**
+   * The rules move the hero at full speed from the first tick. On screen that reads as a
+   * jolt, so the body that is drawn follows the rules' position with a limited
+   * acceleration: it gathers speed over a fifth of a second and catches up within half a
+   * metre. Feet, camera and facing all follow this body.
+   */
   private syncHero(alpha: number, dt: number): void {
     const hero = this.hero!;
     const { player } = this.world;
-    const x = this.previous.x + (player.pos.x - this.previous.x) * alpha;
-    const y = this.previous.y + (player.pos.y - this.previous.y) * alpha;
-    const step = Math.hypot(player.pos.x - this.previous.x, player.pos.y - this.previous.y);
-    const speed = (step * TILE * 1000) / TICK_MS;
+    const target = this.heroTarget.set(
+      (this.previous.x + (player.pos.x - this.previous.x) * alpha) * TILE, 0,
+      (this.previous.y + (player.pos.y - this.previous.y) * alpha) * TILE,
+    );
+    const ruleVel = this.heroRuleVel.set(player.pos.x - this.previous.x, 0, player.pos.y - this.previous.y).multiplyScalar((TILE * 1000) / TICK_MS);
+    const body = this.heroBody;
+    body.update(target, ruleVel, dt);
+    const vel = body.velocity;
+    const speed = Math.hypot(vel.x, vel.z);
     let face: THREE.Vector3 | null = null;
-    if (player.pendingAttack || player.attackCooldown > 0) face = new THREE.Vector3(player.facing.x, 0, player.facing.y);
-    else if (step > 1e-4) face = new THREE.Vector3(player.pos.x - this.previous.x, 0, player.pos.y - this.previous.y);
+    if (player.pendingAttack || player.attackCooldown > 0) face = this.heroFace.set(player.facing.x, 0, player.facing.y);
+    else if (speed > 0.3) face = this.heroFace.copy(vel);
     hero.setCombat(this.lockedId !== null || performance.now() - this.lastFight < 4000);
-    hero.update(dt, { position: new THREE.Vector3(x * TILE, 0, y * TILE), speed, face });
+    hero.update(dt, { position: body.position, speed, face });
   }
 
   /** Where the hero is on screen, for the circle in which trees and houses dissolve. */
@@ -517,6 +551,14 @@ export class WorldScene {
         view.userData.age = 0;
         this.lootViews.set(loot.id, view);
         scene.add(view);
+        // Its name floats over it, coloured by quality, as in classic MMORPGs.
+        const color = loot.mods ? `#${QUALITY_COLOR[loot.mods.quality].toString(16).padStart(6, '0')}` : loot.itemId === 'coins' ? '#e8c36a' : undefined;
+        this.effects.label(view, this.events.lootName(loot), view, 0.55, 'world-label loot', color);
+        view.userData.count = loot.count;
+      } else if (view.userData.count !== loot.count) {
+        // Part of a stack was taken (the bag was full): the label shows what is left.
+        view.userData.count = loot.count;
+        this.effects.label(view, this.events.lootName(loot), view, 0.55, 'world-label loot');
       }
       view.userData.age += dt;
       const age = view.userData.age as number;
@@ -530,6 +572,7 @@ export class WorldScene {
     }
     for (const [id, view] of this.lootViews) {
       if (present.has(id)) continue;
+      this.effects.unlabel(view);
       scene.remove(view);
       disposeTree(view);
       this.lootViews.delete(id);
@@ -581,8 +624,18 @@ export class WorldScene {
       canvas.setPointerCapture(e.pointerId);
       this.pointerHeld = true;
       this.holdTimer = 0;
+      // A click on a thing on the ground: walk to it and pick it up.
+      const loot = e.button === 0 ? this.lootAt(e.clientX, e.clientY) : null;
+      if (loot) {
+        this.pickId = loot.id;
+        this.lockedId = null;
+        this.pickTimer = 1e9;
+        this.pointerHeld = false;
+        return;
+      }
       // A click on a monster picks it as the target: the hero goes after it and keeps striking.
       const picked = e.button === 0 ? this.monsterAt(e.clientX, e.clientY) : null;
+      this.pickId = null;
       if (picked) {
         if (!this.peaceful) this.lockedId = picked.id;
         this.targetId = picked.id;
@@ -610,7 +663,7 @@ export class WorldScene {
       const command = COMMAND_KEYS[event.code];
       const known =
         event.code in KEY_DIRECTIONS || event.code === ATTACK_KEY || event.code === INVENTORY_KEY || event.code === CANCEL_KEY ||
-        event.code === INTERACT_KEY || skill !== undefined || command !== undefined;
+        event.code === INTERACT_KEY || event.code === PICKUP_KEY || skill !== undefined || command !== undefined;
       if (!known || this.paused || event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.code === INVENTORY_KEY) {
         if (!event.repeat) this.events.onToggleInventory();
@@ -627,6 +680,10 @@ export class WorldScene {
       }
       if (event.code === INTERACT_KEY) {
         if (!event.repeat) this.events.onInteract();
+        return;
+      }
+      if (event.code === PICKUP_KEY) {
+        if (!event.repeat) this.pickNearest();
         return;
       }
       if (command !== undefined) {
@@ -674,8 +731,70 @@ export class WorldScene {
         this.orderMoveTo(this.pointer.x, this.pointer.y);
       }
     }
-    if (this.hasDirectionKeys()) this.lockedId = null;
+    if (this.hasDirectionKeys()) {
+      this.lockedId = null;
+      this.pickId = null;
+    }
     this.fightLocked(delta);
+    this.collect(delta);
+  }
+
+  /** Z: the nearest thing on the ground within reach of a short walk. */
+  private pickNearest(): void {
+    const { pos } = this.world.player;
+    let best: GroundLoot | null = null;
+    let bestDistance = PICKUP_SEARCH;
+    for (const loot of this.world.loot) {
+      const d = Math.hypot(loot.pos.x - pos.x, loot.pos.y - pos.y);
+      if (d < bestDistance) {
+        best = loot;
+        bestDistance = d;
+      }
+    }
+    if (!best) return;
+    this.pickId = best.id;
+    this.lockedId = null;
+    this.pickTimer = 1e9;
+  }
+
+  /**
+   * Walks to the thing the hero was told to pick up and picks it up once within reach,
+   * as a player would: the rules only take it when he stands next to it.
+   */
+  private collect(delta: number): void {
+    if (this.pickId === null) return;
+    const loot = this.world.loot.find((l) => l.id === this.pickId);
+    if (!loot || !isAlive(this.world) || this.lockedId !== null) {
+      this.pickId = null;
+      return;
+    }
+    const { pos } = this.world.player;
+    if (Math.hypot(loot.pos.x - pos.x, loot.pos.y - pos.y) <= LOOT_PICKUP_RADIUS - 0.1) {
+      this.pending.push({ type: 'pickUp', id: loot.id });
+      this.pickId = null;
+      return;
+    }
+    this.pickTimer += delta;
+    if (this.pickTimer >= 200) {
+      this.pickTimer = 0;
+      this.pending.push({ type: 'moveTo', x: loot.pos.x, y: loot.pos.y });
+    }
+  }
+
+  /** The thing on the ground drawn under a screen point, if any. */
+  private lootAt(clientX: number, clientY: number): GroundLoot | null {
+    let best: GroundLoot | null = null;
+    let bestDistance = LOOT_PICK_PX;
+    for (const loot of this.world.loot) {
+      const p = at(loot.pos).setY(0.15);
+      if (!this.stage.project(p, this.screen)) continue;
+      const d = Math.hypot(this.screen.x - clientX, this.screen.y - clientY);
+      if (d < bestDistance) {
+        best = loot;
+        bestDistance = d;
+      }
+    }
+    return best;
   }
 
   private lockedMonster(): Monster | null {
@@ -996,7 +1115,8 @@ export class WorldScene {
     };
     ringFor(target, this.effects.targetRing);
     ringFor(hover && hover !== target ? hover : null, this.effects.hoverRing);
-    this.stage.canvas.style.cursor = hover ? 'crosshair' : 'default';
+    const overLoot = !hover && this.pointer.over && !this.pointerHeld && this.lootAt(this.pointer.x, this.pointer.y) !== null;
+    this.stage.canvas.style.cursor = hover ? 'crosshair' : overLoot ? 'pointer' : 'default';
 
     const shown = target ? `${target.id}/${target.hp}` : '';
     if (shown === this.shownTarget) return;

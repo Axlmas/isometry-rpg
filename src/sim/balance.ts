@@ -52,8 +52,8 @@ export const DEATH_XP_LOSS = 0.05;
 export const UNARMED_DAMAGE: readonly [number, number] = [3, 5];
 /** How many different stacks the hero can carry. */
 export const INVENTORY_SLOTS = 24;
-/** The hero picks up loot lying this close. */
-export const LOOT_PICKUP_RADIUS = 0.7;
+/** The hero picks up a thing lying this close (he walks up to it first). */
+export const LOOT_PICKUP_RADIUS = 1.0;
 /** However good the armour, a blow that lands always hurts at least this much. */
 export const MIN_DAMAGE_TAKEN = 1;
 /** How far the weapon reaches from the hero's centre. */

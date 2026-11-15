@@ -34,7 +34,7 @@
   "hud.autosaveOff": "This browser does not allow saving. Progress will be lost when you close the page.",
   "help.open": "Help",
   "help.title": "Controls",
-  "hud.hint": "Move: click the ground (hold the button and the hero follows the cursor) or WASD. Fight: click a monster and the hero walks up and keeps striking until one of you falls; Space attacks the nearest monster; Esc drops the target. Skills Q, E, R strike the target (learn them from the trainer in the village). Potions: 1 and 2. Weapon charges on or off: F. T: talk to the person next to you, or enter a glowing doorway. I: bag. Mouse wheel: zoom. Walk over loot to pick it up. In the village the hunter tells what each monster drops, and the blacksmith tempers and crafts equipment. The world is open: leave the village through the east gate and follow the road.",
+  "hud.hint": "Move: click the ground (hold the button and the hero follows the cursor) or WASD. Fight: click a monster and the hero walks up and keeps striking until one of you falls; Space attacks the nearest monster; Esc drops the target. Loot: click a thing on the ground and the hero walks up and picks it up; Z picks up the nearest. Skills Q, E, R strike the target (learn them from the trainer in the village). Potions: 1 and 2. Weapon charges on or off: F. T: talk to the person next to you, or enter a glowing doorway. I: bag. Mouse wheel: zoom. In the village the hunter tells what each monster drops, and the blacksmith tempers and crafts equipment. The world is open: leave the village through the east gate and follow the road.",
   "hud.coins": "{count, plural, one {# coin} other {# coins}}",
   "skill.heavyBlow": "Heavy Blow",
   "skill.sweep": "Sweep",
@@ -299,5 +299,7 @@
   "error.title": "Something went wrong",
   "error.body": "The game has stopped. Your progress up to your last stop is safe. Reload the page to continue.",
   "error.bodyNoSave": "The game has stopped. Reload the page to start again.",
-  "error.reload": "Reload"
+  "error.reload": "Reload",
+  "loot.coins": "{count, plural, one {# coin} other {# coins}}",
+  "loot.stack": "{item} ×{count}"
 }

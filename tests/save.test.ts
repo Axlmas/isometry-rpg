@@ -55,14 +55,14 @@ describe('save', () => {
     world.player.coins = 123;
     world.player.inventory = [{ itemId: 'coal', count: 40 }, { itemId: 'ironSword', count: 1 }];
     world.player.equipment = { ...NO_GEAR, weapon: 'soldierBlade', armor: 'chainShirt' };
-    world.loot = [{ id: 7, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y }, ignored: true }];
+    world.loot = [{ id: 7, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y } }];
     const loaded = parseSave(serializeWorld(world));
     expect(loaded.status).toBe('ok');
     if (loaded.status !== 'ok') return;
     expect(loaded.world.player.coins).toBe(123);
     expect(loaded.world.player.inventory).toEqual(world.player.inventory);
     expect(loaded.world.player.equipment).toEqual(world.player.equipment);
-    expect(loaded.world.loot).toEqual([{ id: 0, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y }, ignored: false }]);
+    expect(loaded.world.loot).toEqual([{ id: 0, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y } }]);
   });
 
   it('remembers level, experience, mana and the dungeon level', () => {

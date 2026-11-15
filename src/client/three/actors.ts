@@ -339,8 +339,8 @@ export class Humanoid {
     if (!this.dead) {
       if (motion.face && motion.face.lengthSq() > 1e-6) {
         const want = Math.atan2(motion.face.x, motion.face.z);
-        // Setting off, the character turns at once, as in classic MMORPGs; on the way, smoothly.
-        this.heading = moving && !this.moving ? want : turnToward(this.heading, want, 18, dt);
+        // A quick turn, but a turn: snapping round reads as a jolt.
+        this.heading = turnToward(this.heading, want, 16, dt);
       }
       this.object.rotation.y = this.heading;
     }
@@ -360,8 +360,8 @@ export class Humanoid {
           const stride = this.strides.get(legs) ?? 0;
           rate = stride > 0.1 ? THREE.MathUtils.clamp(motion.speed / stride, 0.4, 2.6) : 1;
         }
-        // Setting off, the legs start running almost at once: no glide in a standing pose.
-        const lowerAction = lower.play(legs, { fade: started ? 0.04 : 0.12 });
+        // The body gathers speed smoothly, so the legs blend from standing to walking to running.
+        const lowerAction = lower.play(legs, { fade: started ? 0.18 : 0.2 });
         if (lowerAction) lowerAction.timeScale = rate;
         if (!upper.busy() && !this.frozen) {
           const stance = `stance-${this.weapon}`;
@@ -369,7 +369,7 @@ export class Humanoid {
             upper.play(stance, { fade: 0.2 });
           } else {
             // The arms follow the legs, in step with them.
-            const upperAction = upper.play(legs, { fade: started ? 0.04 : 0.15, at: lowerAction?.time });
+            const upperAction = upper.play(legs, { fade: 0.2, at: lowerAction?.time });
             if (upperAction) upperAction.timeScale = rate;
           }
         }

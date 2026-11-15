@@ -293,38 +293,30 @@ export function useItem(world: World, itemId: ItemId): void {
   world.events.push({ type: 'itemUsed', itemId });
 }
 
-/** Puts an item on the floor. `ignored` keeps the hero from picking it right back up. */
-export function dropLoot(world: World, itemId: ItemId, count: number, at: Point, ignored = false, enchant = 0, mods?: ItemMods | null): void {
+/** Puts an item on the floor. */
+export function dropLoot(world: World, itemId: ItemId, count: number, at: Point, enchant = 0, mods?: ItemMods | null): void {
   const id = world.nextLootId;
   world.nextLootId += 1;
-  world.loot.push({ id, itemId, count, pos: pushOutOfWalls(world.map, at, PLAYER_RADIUS), ignored, ...(enchant > 0 ? { enchant } : {}), ...(mods ? { mods } : {}) });
+  world.loot.push({ id, itemId, count, pos: pushOutOfWalls(world.map, at, PLAYER_RADIUS), ...(enchant > 0 ? { enchant } : {}), ...(mods ? { mods } : {}) });
   world.events.push({ type: 'lootDropped', id });
 }
 
-/** The hero collects whatever lies within reach. */
-export function pickUpLoot(world: World): void {
+/**
+ * The hero picks up one thing from the floor, as in classic MMORPGs: only when told to
+ * and only within reach. Coins never take a slot; when the bag cannot take all of a
+ * stack, the rest stays on the floor and the hero is told the bag is full.
+ */
+export function pickUp(world: World, id: number): void {
   const { player } = world;
-  let reportedFull = false;
-  for (const loot of world.loot) {
-    const near = Math.hypot(loot.pos.x - player.pos.x, loot.pos.y - player.pos.y) <= LOOT_PICKUP_RADIUS;
-    if (!near) {
-      loot.ignored = false; // The hero walked away; next time they come back, try again.
-      continue;
-    }
-    if (loot.ignored) continue;
-    const left = addItem(player, loot.itemId, loot.count, loot.enchant ?? 0, loot.mods);
-    if (left < loot.count) {
-      world.events.push({ type: 'itemPicked', itemId: loot.itemId, count: loot.count - left, ...(loot.mods ? { quality: loot.mods.quality } : {}) });
-    }
-    loot.count = left;
-    if (left > 0) {
-      // No room: leave it and say so once, not on every tick the hero stands here.
-      loot.ignored = true;
-      if (!reportedFull) world.events.push({ type: 'inventoryFull' });
-      reportedFull = true;
-    }
+  const loot = world.loot.find((l) => l.id === id);
+  if (!loot || Math.hypot(loot.pos.x - player.pos.x, loot.pos.y - player.pos.y) > LOOT_PICKUP_RADIUS) return;
+  const left = addItem(player, loot.itemId, loot.count, loot.enchant ?? 0, loot.mods);
+  if (left < loot.count) {
+    world.events.push({ type: 'itemPicked', itemId: loot.itemId, count: loot.count - left, ...(loot.mods ? { quality: loot.mods.quality } : {}) });
   }
-  world.loot = world.loot.filter((loot) => loot.count > 0);
+  loot.count = left;
+  if (left > 0) world.events.push({ type: 'inventoryFull' });
+  world.loot = world.loot.filter((l) => l.count > 0);
 }
 
 /** Wears the item in the given inventory slot; whatever was worn takes its place. */
@@ -375,5 +367,5 @@ export function dropFromInventory(world: World, index: number): void {
   if (!stack) return;
   player.inventory.splice(index, 1);
   player.revision += 1;
-  dropLoot(world, stack.itemId, stack.count, player.pos, true, stack.enchant ?? 0, stack.mods);
+  dropLoot(world, stack.itemId, stack.count, player.pos, stack.enchant ?? 0, stack.mods);
 }

@@ -5,7 +5,7 @@ import {
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
-import { attackCooldown, dropFromInventory, equipFromInventory, gearStats, pickUpLoot, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
+import { attackCooldown, dropFromInventory, equipFromInventory, gearStats, pickUp, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
 import { fire, updateProjectiles } from './projectiles';
 import { CLASSES, RACES } from './classes';
 import { craft } from './crafting';
@@ -121,6 +121,9 @@ function applyCommand(world: World, command: Command): void {
       return;
     case 'drop':
       dropFromInventory(world, command.index);
+      return;
+    case 'pickUp':
+      if (Number.isInteger(command.id)) pickUp(world, command.id);
       return;
     case 'use':
       useItem(world, command.itemId);
@@ -238,7 +241,6 @@ export function step(world: World, commands: readonly Command[] = []): void {
 
   updateProjectiles(world);
   updateMonsters(world);
-  if (player.hp > 0) pickUpLoot(world);
 
   if (player.hp > 0) {
     player.ticksSinceHurt += 1;

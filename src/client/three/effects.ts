@@ -69,11 +69,12 @@ export class Effects {
   }
 
   /** A name kept over an object's head until removed. */
-  label(key: object, text: string, target: THREE.Object3D, height: number, className = 'world-label'): void {
+  label(key: object, text: string, target: THREE.Object3D, height: number, className = 'world-label', color?: string): void {
     this.unlabel(key);
     const el = document.createElement('div');
     el.className = className;
     el.textContent = text;
+    if (color) el.style.color = color;
     this.layer.appendChild(el);
     this.labels.set(key, { el, target, height });
   }
