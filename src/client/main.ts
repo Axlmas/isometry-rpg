@@ -79,6 +79,7 @@ function showStats(w: World): void {
 function dangerText(w: World, r: Region): string {
   if (r.safe) return i18n.t('zone.safe');
   if (r.levels === null) return i18n.t('zone.level', { level: w.dungeonLevel });
+  if (r.levels[0] === r.levels[1]) return i18n.t('zone.level', { level: r.levels[0] });
   return i18n.t('zone.levels', { min: r.levels[0], max: r.levels[1] });
 }
 
