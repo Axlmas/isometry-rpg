@@ -22,6 +22,8 @@ export class DevPanel {
       'dev-heal': { type: 'dev', action: 'heal' },
       'dev-clear': { type: 'dev', action: 'clear' },
       'dev-go-village': { type: 'dev', action: 'teleport', to: 'village' },
+      'dev-go-pasture': { type: 'dev', action: 'teleport', to: 'pasture' },
+      'dev-go-thicket': { type: 'dev', action: 'teleport', to: 'thicket' },
       'dev-go-moor': { type: 'dev', action: 'teleport', to: 'moor' },
       'dev-go-hollow': { type: 'dev', action: 'teleport', to: 'hollow' },
       'dev-go-mines': { type: 'dev', action: 'teleport', to: 'mines' },

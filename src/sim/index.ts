@@ -4,6 +4,7 @@ export * from './collision';
 export * from './crafting';
 export * from './dev';
 export * from './grid';
+export * from './noise';
 export * from './inventory';
 export * from './items';
 export * from './mods';

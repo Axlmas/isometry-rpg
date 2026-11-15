@@ -5,7 +5,11 @@ export interface Point {
 
 export const TILE_FLOOR = 0;
 export const TILE_WALL = 1;
-export type Tile = typeof TILE_FLOOR | typeof TILE_WALL;
+/** Open-world obstacles that differ from a wall only in how they look. Nothing walks or flies through them. */
+export const TILE_WATER = 2;
+export const TILE_ROCK = 3;
+export const TILE_RUIN = 4;
+export type Tile = typeof TILE_FLOOR | typeof TILE_WALL | typeof TILE_WATER | typeof TILE_ROCK | typeof TILE_RUIN;
 
 export interface GridMap {
   width: number;

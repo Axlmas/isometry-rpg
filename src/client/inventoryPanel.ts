@@ -5,8 +5,8 @@ import {
   PLAYER_ATTACK_COOLDOWN,
 } from '../sim';
 import { itemIcon } from './itemIcon';
-import { GRADE_NAME, SLOT_NAME, WEAPON_NAME, qualityCss } from './itemText';
-import { affixText, element, gearKind, gearScore, itemEffect, itemName, make } from './itemView';
+import { GRADE_NAME, SLOT_NAME, WEAPON_NAME } from './itemText';
+import { affixText, element, gearColor, gearKind, gearScore, itemEffect, itemName, make, uniqueAffixes } from './itemView';
 
 /** An item as the panel shows it: what it is, how many, and what makes this copy special. */
 interface Shown {
@@ -145,7 +145,7 @@ export class InventoryPanel {
       return;
     }
     const def = ITEMS[itemId];
-    if (def.kind === 'equipment') cell.root.dataset.quality = item?.mods?.quality ?? 'common';
+    if (def.kind === 'equipment') cell.root.dataset.quality = uniqueAffixes(def).length > 0 ? 'trophy' : (item?.mods?.quality ?? 'common');
     else delete cell.root.dataset.quality;
     const parts: HTMLElement[] = [itemIcon(itemId)];
     if (def.kind === 'equipment' && def.grade === 'd') parts.push(make('span', 'cell-grade', this.i18n.t('grade.dShort')));
@@ -203,7 +203,8 @@ export class InventoryPanel {
   /** Everything there is to say about an item, line by line. Used by the tooltip and the panel under the grid. */
   private lines({ itemId, count, enchant, mods }: Shown): { name: string; color: string | null; lines: string[]; affixes: string[]; better: boolean } {
     const { i18n } = this;
-    const affixes = (mods?.affixes ?? []).map((affix) => affixText(i18n, affix));
+    const own = ITEMS[itemId];
+    const affixes = [...(own.kind === 'equipment' ? uniqueAffixes(own) : []), ...(mods?.affixes ?? [])].map((affix) => affixText(i18n, affix));
     const def = ITEMS[itemId];
     const base = itemId === 'coins' ? '' : itemName(i18n, itemId, enchant);
     const name = count > 1 ? i18n.t('inventory.stack', { item: base, count }) : base;
@@ -211,10 +212,10 @@ export class InventoryPanel {
     let color: string | null = null;
     let better = false;
     if (def.kind === 'equipment') {
-      color = qualityCss(mods?.quality ?? 'common');
+      color = gearColor(def, mods);
       // A weapon says what kind it is, because only one class can use it.
       const kind = def.slot === 'weapon' ? i18n.t(WEAPON_NAME[def.weaponType]) : i18n.t(SLOT_NAME[def.slot]);
-      lines.push(gearKind(i18n, kind, def, mods));
+      lines.push(uniqueAffixes(def).length > 0 ? `${gearKind(i18n, kind, def, mods)} · ${i18n.t('quality.trophy')}` : gearKind(i18n, kind, def, mods));
       better = this.isBetter(def, enchant, mods);
     } else if (def.kind === 'scroll' || (def.kind === 'consumable' && def.effect.kind === 'charge')) {
       lines.push(i18n.t(GRADE_NAME[def.kind === 'scroll' ? def.grade : (def.effect as { grade: 'none' | 'd' }).grade]));

@@ -23,7 +23,9 @@ export const NPC_LOOK: Record<NpcKind, { clothes: number; shade: number; sign: n
 
 /** Monster kinds to the names shown in the target frame. */
 export const MONSTER_NAME: Record<MonsterKind, MessageKey> = {
+  wolfPup: 'monster.wolfPup',
   wolf: 'monster.wolf',
+  tusker: 'monster.tusker',
   boar: 'monster.boar',
   grunt: 'monster.grunt',
 };

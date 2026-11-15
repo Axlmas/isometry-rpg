@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Npc, type Point, type Quality, type SkillId, type World, type ZoneKind,
-  ITEMS, PLAYER_ATTACK_ARC, SKILLS, classSkills, weaponInHand, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
+  ITEMS, PLAYER_ATTACK_ARC, SKILLS, classSkills, weaponInHand, PLAYER_ATTACK_RANGE, TICK_MS, TILE_FLOOR, TILE_ROCK, TILE_RUIN, TILE_WATER, fractal2,
   isAlive, isMoving, isRoad, isWalkable, regionAt, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { QUALITY_COLOR } from './itemText';
+import { WATER_COLOR } from './zoneText';
 import { QUICK_KEYS } from './hotbar';
 import { NPC_LOOK } from './npcText';
 import { type AnimationName, HERO_SHEET, MONSTER_SHEET, NPC_SHEET, createAnimations, createCharacter, directionOf, hasSheet, playCharacter, preloadSheets } from './sheets';
@@ -23,6 +24,9 @@ const AUTO_AIM_RANGE = PLAYER_ATTACK_RANGE + 1;
 const EFFECT_DEPTH = 100000;
 /** How much bigger an elder monster is drawn. */
 const ELDER_SCALE = 1.35;
+/** Some kinds are the same beast, younger or heavier. */
+const KIND_SCALE: Partial<Record<Monster['kind'], number>> = { wolfPup: 0.72, tusker: 1.22 };
+const monsterScale = (monster: Monster): number => (KIND_SCALE[monster.kind] ?? 1) * (monster.elder ? ELDER_SCALE : 1);
 /** Screens with more pixels per inch get a larger canvas, so the picture stays sharp. Capped to keep it fast. */
 export const RENDER_SCALE = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
 /** Obstacle pictures are painted this many times larger than shown, so they stay sharp when the camera zooms in. */
@@ -31,6 +35,7 @@ const TEXTURE_SCALE = 2;
 const TARGET_MEMORY_MS = 5000;
 /** Colour of a blow strengthened by a weapon charge, and of the blade while charges are on. */
 const CHARGE_COLOR = 0x7fe9ff;
+const SHORE_COLOR: readonly [number, number, number] = [116, 108, 82];
 
 // Physical key positions (KeyboardEvent.code), so controls work on any
 // keyboard layout, including Cyrillic. Values are directions on the screen.
@@ -140,6 +145,8 @@ export class DungeonScene extends Phaser.Scene {
   private targetUntil = 0;
   private shownTarget = '';
   private marker!: Phaser.GameObjects.Graphics;
+  /** Figures in the middle of a hit flash, with the alpha they should return to. */
+  private readonly flashing = new Map<Phaser.GameObjects.Container, number>();
 
   constructor(world: World, events: SceneEvents) {
     super('dungeon');
@@ -217,6 +224,17 @@ export class DungeonScene extends Phaser.Scene {
       window.removeEventListener('blur', onBlur);
     });
 
+    // A soft darkening towards the edges of the screen and a slightly cool cast pull the picture together.
+    const holder = this.game.canvas.parentElement;
+    if (holder && !holder.querySelector('.vignette')) {
+      const shade = document.createElement('div');
+      shade.className = 'vignette';
+      shade.setAttribute('aria-hidden', 'true');
+      shade.style.cssText =
+        'position:absolute;inset:0;pointer-events:none;' +
+        'background:radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 42%, rgba(4,6,10,0.34) 78%, rgba(2,3,6,0.62) 100%),linear-gradient(rgba(20,28,44,0.10), rgba(34,24,12,0.10));';
+      holder.append(shade);
+    }
     this.scale.on('resize', this.fitCamera, this);
     this.fitCamera();
     this.setWorld(this.world);
@@ -517,6 +535,7 @@ export class DungeonScene extends Phaser.Scene {
       case 'sold':
         this.events_.onNotice(event);
         return true;
+      case 'masteryUp':
       case 'skillLearned':
       case 'recipeLearned':
       case 'crafted':
@@ -633,9 +652,15 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private flash(target: Phaser.GameObjects.Container): void {
-    const restore = target.alpha;
+    // A second hit may land while the first flash is still on, so the alpha to
+    // return to is remembered once per target, not read back from a dimmed figure.
+    if (!this.flashing.has(target)) this.flashing.set(target, target.alpha);
+    const restore = this.flashing.get(target) ?? 1;
     target.setAlpha(0.4);
-    this.time.delayedCall(70, () => target.active && target.setAlpha(restore));
+    this.time.delayedCall(70, () => {
+      this.flashing.delete(target);
+      if (target.active) target.setAlpha(restore);
+    });
   }
 
   private showPuff(x: number, y: number): void {
@@ -806,7 +831,7 @@ export class DungeonScene extends Phaser.Scene {
     const figure = this.add.container(0, 0, sprite ? [body, sprite] : [body]);
     const container = this.add.container(0, 0, [figure, bar]);
     // An elder is plainly bigger than its kin.
-    if (monster.elder) figure.setScale(ELDER_SCALE);
+    figure.setScale(monsterScale(monster));
     return { container, figure, body, sprite, direction: 1, bar, previous: { ...monster.pos }, lastHp: -1 };
   }
 
@@ -849,7 +874,7 @@ export class DungeonScene extends Phaser.Scene {
         playCharacter(this, sprite.sprite, sheet, monster.windup > 0 ? 'attack' : stepping ? 'run' : 'idle', sprite.direction);
       } else {
         const heading = monster.aggro ? tileToScreen(this.world.player.pos.x - x, this.world.player.pos.y - y).x : at.x - sprite.container.x;
-        const size = monster.elder ? ELDER_SCALE : 1;
+        const size = monsterScale(monster);
         if (Math.abs(heading) > 0.3) sprite.figure.setScale(heading < 0 ? -size : size, size);
         sprite.figure.y = stepping ? -Math.abs(Math.sin(performance.now() / 90 + monster.id)) * 2 : 0;
       }
@@ -1042,11 +1067,20 @@ export class DungeonScene extends Phaser.Scene {
         for (let y = cy; y < cy + h; y++) {
           for (let x = cx; x < cx + w; x++) {
             const look = REGION_LOOK[regionAt(zone, { x, y }).id];
-            const isWall = tileAt(map, x, y) === TILE_WALL;
-            // Trees stand on grass, so the ground is drawn under them too.
+            const tile = tileAt(map, x, y);
+            const isWall = tile !== TILE_FLOOR;
+            // Trees and boulders stand on grass, so the ground is drawn under them too.
             if (isWall && look.walls !== 'trees') continue;
             const c = tileToScreen(x, y);
-            this.paintGround(brush, c.x - minX, c.y - minY, x, y, !isWall && isRoad(zone, x, y) ? ROAD_COLOR : look.floor, look.walls);
+            if (tile === TILE_WATER) {
+              this.paintWater(brush, c.x - minX, c.y - minY, x, y);
+              continue;
+            }
+            const road = !isWall && isRoad(zone, x, y);
+            // The ground turns to wet sand at the water's edge.
+            const shore = !road && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => tileAt(map, x + (dx as number), y + (dy as number)) === TILE_WATER);
+            const base = road ? ROAD_COLOR : shore ? SHORE_COLOR : look.floor;
+            this.paintGround(brush, c.x - minX, c.y - minY, x, y, base, look.walls, road || shore ? null : regionAt(zone, { x, y }).id);
           }
         }
         const key = `floor-${cx}-${cy}`;
@@ -1059,10 +1093,16 @@ export class DungeonScene extends Phaser.Scene {
 
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if (tileAt(map, x, y) !== TILE_WALL) continue;
-        const walls = REGION_LOOK[regionAt(zone, { x, y }).id].walls;
+        const tile = tileAt(map, x, y);
+        if (tile === TILE_FLOOR || tile === TILE_WATER) continue;
+        const region = regionAt(zone, { x, y }).id;
+        const walls = REGION_LOOK[region].walls;
         let key: string;
-        if (walls === 'trees') key = `tree${(x * 31 + y * 17) % 3}`;
+        if (tile === TILE_ROCK) key = `rock${(x * 7 + y * 13) % 3}`;
+        else if (tile === TILE_RUIN) key = (x * 5 + y * 3) % 3 === 0 ? 'ruinLow' : 'ruin';
+        // Firs in the dark thicket, a mix on the moor, broad-leaved trees elsewhere.
+        else if (walls === 'trees' && (region === 'thicket' || (region === 'moor' && (x * 31 + y * 17) % 3 === 0))) key = `fir${(x * 11 + y * 5) % 2}`;
+        else if (walls === 'trees') key = `tree${(x * 31 + y * 17) % 3}`;
         else if (walls === 'stone') key = 'stone';
         // The outer ring of the village is the palisade; walls inside it are houses.
         else if (this.touchesAnotherRegion(x, y)) key = 'palisade';
@@ -1093,13 +1133,16 @@ export class DungeonScene extends Phaser.Scene {
    * ground does not look like a board. All variation is cosmetic and comes
    * from the tile's coordinates, not from the game's random generator.
    */
-  private paintGround(g: Phaser.GameObjects.Graphics, px: number, py: number, x: number, y: number, base: readonly [number, number, number], walls: 'stone' | 'trees' | 'wood'): void {
+  private paintGround(g: Phaser.GameObjects.Graphics, px: number, py: number, x: number, y: number, base: readonly [number, number, number], walls: 'stone' | 'trees' | 'wood', region: string | null = null): void {
     const hash = (n: number): number => {
       const v = Math.sin(x * 127.1 + y * 311.7 + n * 74.7) * 43758.5453;
       return v - Math.floor(v);
     };
-    const shade = Math.round((hash(0) - 0.5) * 12);
-    const color = Phaser.Display.Color.GetColor(base[0] + shade, base[1] + shade, base[2] + shade);
+    // Broad patches of lighter and darker ground, and a little grain from tile to tile.
+    const patch = walls === 'trees' ? (fractal2(x / 7, y / 7, 77) - 0.5) * 30 : 0;
+    const shade = Math.round((hash(0) - 0.5) * 9 + patch);
+    const clamp = (v: number): number => Math.max(0, Math.min(255, v));
+    const color = Phaser.Display.Color.GetColor(clamp(base[0] + shade * 0.8), clamp(base[1] + shade), clamp(base[2] + shade * 0.6));
     // Slightly larger than the tile so that neighbours overlap and no seams show.
     g.fillStyle(color);
     g.fillPoints([{ x: px, y: py - HALF_H - 0.6 }, { x: px + HALF_W + 1, y: py }, { x: px, y: py + HALF_H + 0.6 }, { x: px - HALF_W - 1, y: py }], true);
@@ -1117,9 +1160,35 @@ export class DungeonScene extends Phaser.Scene {
       else if (walls === 'wood') g.fillEllipse(sx, sy, 3.5, 1.8); // a pebble on packed earth
       else g.fillRect(sx - 2.5, sy, 5, 1); // a crack in stone
     }
+    // What grows here: heather on the moor, flowers on the meadow, ferns in the thicket.
+    if (region !== null && hash(40) > 0.72) {
+      const fx = px + (hash(41) - 0.5) * HALF_W;
+      const fy = py + (hash(42) - 0.5) * HALF_H;
+      if (region === 'moor') g.fillStyle(0x7d5c8c, 0.8).fillCircle(fx, fy, 1.6).fillCircle(fx + 2.5, fy - 1, 1.3).fillCircle(fx - 2, fy + 1, 1.2);
+      else if (region === 'pasture') g.fillStyle(hash(43) > 0.5 ? 0xd8cf8a : 0xc9c9c0, 0.85).fillCircle(fx, fy, 1.2).fillCircle(fx + 4, fy + 2, 1);
+      else if (region === 'thicket') g.lineStyle(1, 0x2f4a30, 0.9).lineBetween(fx, fy, fx - 4, fy - 4).lineBetween(fx, fy, fx + 4, fy - 4).lineBetween(fx, fy, fx, fy - 6);
+      else g.fillStyle(0x4a4630, 0.6).fillEllipse(fx, fy, 6, 2.5);
+    }
     if (walls === 'stone') {
       // Flagstones: a faint joint along two edges.
       g.lineStyle(1, dark, 0.5).lineBetween(px - HALF_W, py, px, py + HALF_H).lineBetween(px, py + HALF_H, px + HALF_W, py);
+    }
+  }
+
+  /** Still water: a dark surface with a few pale ripples. */
+  private paintWater(g: Phaser.GameObjects.Graphics, px: number, py: number, x: number, y: number): void {
+    const hash = (n: number): number => {
+      const v = Math.sin(x * 91.3 + y * 47.9 + n * 13.1) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const depth = (fractal2(x / 4, y / 4, 55) - 0.5) * 18;
+    g.fillStyle(Phaser.Display.Color.GetColor(WATER_COLOR[0] + depth * 0.4, WATER_COLOR[1] + depth, WATER_COLOR[2] + depth));
+    g.fillPoints([{ x: px, y: py - HALF_H - 0.6 }, { x: px + HALF_W + 1, y: py }, { x: px, y: py + HALF_H + 0.6 }, { x: px - HALF_W - 1, y: py }], true);
+    g.lineStyle(1, 0xa9c8d2, 0.35);
+    for (let i = 0; i < 2; i++) {
+      const rx = px + (hash(i) - 0.5) * HALF_W;
+      const ry = py + (hash(i + 5) - 0.5) * HALF_H;
+      g.lineBetween(rx - 5, ry, rx + 5, ry);
     }
   }
 
@@ -1184,6 +1253,18 @@ export class DungeonScene extends Phaser.Scene {
     }
     for (let variant = 0; variant < 3; variant++) {
       bake(`tree${variant}`, 76, 96, 84, (g) => this.drawTree(g, { x: 38, y: 84 }, variant));
+      bake(`rock${variant}`, 64, 52, 40, (g) => this.drawRock(g, { x: 32, y: 40 }, variant));
+    }
+    for (let variant = 0; variant < 2; variant++) {
+      bake(`fir${variant}`, 64, 112, 100, (g) => this.drawFir(g, { x: 32, y: 100 }, variant));
+    }
+    // What is left of an old hall: weathered blocks, some fallen to half their height, moss on top.
+    for (const [key, height] of [['ruin', 34], ['ruinLow', 16]] as const) {
+      block(key, height, (g, c) => {
+        this.drawBlock(g, c, height, 0x5d5a52, 0x45433d, 0x6c7a58);
+        g.lineStyle(1, 0x2c2b27, 0.7).lineBetween(c.x - HALF_W, c.y - height / 2, c.x, c.y - height / 2 + HALF_H).lineBetween(c.x, c.y - height / 2 + HALF_H, c.x + HALF_W, c.y - height / 2);
+        g.fillStyle(0x4f6a3e, 0.8).fillEllipse(c.x - 8, c.y - height - 2, 18, 7).fillEllipse(c.x + 12, c.y - height + 3, 12, 5);
+      });
     }
   }
 
@@ -1201,18 +1282,62 @@ export class DungeonScene extends Phaser.Scene {
   /** A tree with a layered crown. `variant` (0-2) changes its size and tint so a forest does not look stamped. */
   private drawTree(g: Phaser.GameObjects.Graphics, c: Point, variant: number): void {
     const size = 17 + variant * 3;
-    const greens = [[0x24512e, 0x2f6b3a, 0x448a4c, 0x63a862], [0x29582f, 0x357a41, 0x4c9a54, 0x70b56b], [0x1f4a2b, 0x2a5f34, 0x3d7f47, 0x599c5c]][variant] as number[];
-    g.fillStyle(0x000000, 0.28).fillEllipse(c.x + 4, c.y + 1, 46, 19);
+    // Deep, greyed greens: woods seen on an overcast day rather than a picture-book lawn.
+    const greens = [[0x1c3524, 0x27482c, 0x35603a, 0x4c7a4a], [0x223a22, 0x2f5230, 0x426b3c, 0x5c8450], [0x182f22, 0x213f29, 0x2f5735, 0x436f45]][variant] as number[];
+    g.fillStyle(0x000000, 0.3).fillEllipse(c.x + 6, c.y + 2, 50, 20);
     // trunk
-    g.fillStyle(0x4a3220).fillRect(c.x - 4, c.y - 26, 8, 26);
-    g.fillStyle(0x6b4a2c).fillRect(c.x - 4, c.y - 26, 3, 26);
-    g.lineStyle(1.5, 0x14110d, 0.9).strokeRect(c.x - 4, c.y - 26, 8, 26);
+    g.fillStyle(0x33261b).fillRect(c.x - 4, c.y - 26, 8, 26);
+    g.fillStyle(0x4d3a28).fillRect(c.x - 4, c.y - 26, 3, 26);
+    g.lineStyle(1, 0x14110d, 0.7).strokeRect(c.x - 4, c.y - 26, 8, 26);
     // crown: a dark underside, then lighter clumps towards the top left, where the light comes from
     const top = c.y - 30 - size;
-    g.fillStyle(0x14110d, 0.9).fillCircle(c.x, top + 4, size + 2.5).fillCircle(c.x - size * 0.7, top + 12, size * 0.75 + 2).fillCircle(c.x + size * 0.7, top + 12, size * 0.75 + 2);
-    g.fillStyle(greens[0] as number).fillCircle(c.x, top + 4, size + 1).fillCircle(c.x - size * 0.7, top + 12, size * 0.75).fillCircle(c.x + size * 0.7, top + 12, size * 0.75);
+    g.fillStyle(0x0e1711, 0.85).fillCircle(c.x, top + 4, size + 1.5).fillCircle(c.x - size * 0.7, top + 12, size * 0.75 + 1.2).fillCircle(c.x + size * 0.7, top + 12, size * 0.75 + 1.2);
+    g.fillStyle(greens[0] as number).fillCircle(c.x, top + 4, size + 0.5).fillCircle(c.x - size * 0.7, top + 12, size * 0.75).fillCircle(c.x + size * 0.7, top + 12, size * 0.75);
     g.fillStyle(greens[1] as number).fillCircle(c.x - 2, top + 1, size * 0.9).fillCircle(c.x - size * 0.7, top + 9, size * 0.6);
     g.fillStyle(greens[2] as number).fillCircle(c.x - 5, top - 3, size * 0.62).fillCircle(c.x + size * 0.45, top + 5, size * 0.4);
-    g.fillStyle(greens[3] as number, 0.9).fillCircle(c.x - 8, top - 6, size * 0.3);
+    g.fillStyle(greens[3] as number, 0.8).fillCircle(c.x - 8, top - 6, size * 0.3);
+    // A scatter of leaf-sized flecks breaks up the round clumps.
+    for (let i = 0; i < 26; i++) {
+      const a = i * 2.399;
+      const r = size * (0.25 + ((i * 37) % 70) / 100);
+      g.fillStyle(i % 3 === 0 ? (greens[3] as number) : (greens[0] as number), 0.55).fillCircle(c.x - 2 + Math.cos(a) * r, top + 5 + Math.sin(a) * r * 0.8, 1.6);
+    }
+  }
+
+  /** A fir: tiers of dark boughs narrowing to a point. */
+  private drawFir(g: Phaser.GameObjects.Graphics, c: Point, variant: number): void {
+    const height = 74 + variant * 14;
+    const greens = variant === 0 ? [0x14281d, 0x1d3a27, 0x2a4f33] : [0x172b22, 0x21402c, 0x305839];
+    g.fillStyle(0x000000, 0.3).fillEllipse(c.x + 5, c.y + 2, 40, 16);
+    g.fillStyle(0x2c2018).fillRect(c.x - 3, c.y - 16, 6, 16);
+    const tiers = 5;
+    for (let i = 0; i < tiers; i++) {
+      const k = i / tiers;
+      const y = c.y - 12 - (height - 12) * k;
+      const half = 22 * (1 - k * 0.78);
+      const tall = (height - 12) / tiers + 12;
+      g.fillStyle(0x0c1510, 0.9).fillTriangle(c.x - half - 1.5, y + 1, c.x + half + 1.5, y + 1, c.x, y - tall - 1.5);
+      g.fillStyle(greens[0] as number).fillTriangle(c.x - half, y, c.x + half, y, c.x, y - tall);
+      g.fillStyle(greens[1] as number).fillTriangle(c.x - half, y, c.x + half * 0.15, y, c.x, y - tall);
+      g.fillStyle(greens[2] as number, 0.8).fillTriangle(c.x - half * 0.8, y - 2, c.x - half * 0.2, y - 2, c.x - 1, y - tall * 0.8);
+    }
+  }
+
+  /** A boulder: an uneven lump with a lit side, a shadowed side and a patch of moss or lichen. */
+  private drawRock(g: Phaser.GameObjects.Graphics, c: Point, variant: number): void {
+    const w = 20 + variant * 4;
+    const h = 16 + variant * 7;
+    g.fillStyle(0x000000, 0.3).fillEllipse(c.x + 4, c.y + 3, w * 2.3, 14);
+    const outline = [
+      { x: c.x - w, y: c.y }, { x: c.x - w * 0.8, y: c.y - h * 0.7 }, { x: c.x - w * 0.2, y: c.y - h },
+      { x: c.x + w * 0.55, y: c.y - h * 0.85 }, { x: c.x + w, y: c.y - h * 0.3 }, { x: c.x + w * 0.85, y: c.y + 5 }, { x: c.x - w * 0.5, y: c.y + 7 },
+    ];
+    g.fillStyle(0x56574f).fillPoints(outline, true);
+    // The side away from the light.
+    g.fillStyle(0x3c3d38).fillPoints([{ x: c.x + w * 0.1, y: c.y - h * 0.95 }, { x: c.x + w * 0.55, y: c.y - h * 0.85 }, { x: c.x + w, y: c.y - h * 0.3 }, { x: c.x + w * 0.85, y: c.y + 5 }, { x: c.x + w * 0.2, y: c.y + 6 }], true);
+    g.fillStyle(0x787a70, 0.9).fillPoints([{ x: c.x - w * 0.75, y: c.y - h * 0.65 }, { x: c.x - w * 0.2, y: c.y - h * 0.95 }, { x: c.x + w * 0.05, y: c.y - h * 0.6 }, { x: c.x - w * 0.5, y: c.y - h * 0.35 }], true);
+    g.lineStyle(1, 0x1e1f1c, 0.8).strokePoints(outline, true, true);
+    g.lineStyle(1, 0x2a2b27, 0.6).lineBetween(c.x - w * 0.3, c.y - h * 0.5, c.x + w * 0.1, c.y - h * 0.1);
+    g.fillStyle(variant === 1 ? 0x8a8f6a : 0x4a6238, 0.75).fillEllipse(c.x - w * 0.35, c.y - h * 0.85, w * 0.7, 5);
   }
 }

@@ -94,8 +94,8 @@ export function useSkill(world: World, id: SkillId, dir: Point | null): void {
     const multiplier = effect.multiplier * (charged ? CHARGE_DAMAGE_MULTIPLIER : 1);
     player.pendingAttack =
       effect.kind === 'strike'
-        ? { dir: aim, ticks: PLAYER_ATTACK_WINDUP, arc: effect.arc, range: effect.range, multiplier, charged, shot: null }
-        : { dir: aim, ticks: PLAYER_ATTACK_WINDUP, arc: 0, range: 0, multiplier, charged, shot: { count: effect.count, spread: effect.spread, pierce: effect.pierce, splash: effect.splash } };
+        ? { dir: aim, ticks: PLAYER_ATTACK_WINDUP, arc: effect.arc, range: effect.range, multiplier, charged, cleave: effect.arc > Math.PI, shot: null }
+        : { dir: aim, ticks: PLAYER_ATTACK_WINDUP, arc: 0, range: 0, multiplier, charged, cleave: false, shot: { count: effect.count, spread: effect.spread, pierce: effect.pierce, splash: effect.splash } };
   } else if (effect.kind === 'nova') {
     hitMonstersAround(world, player.pos, effect.radius, effect.multiplier, effect.slow);
   } else if (effect.kind === 'heal') {

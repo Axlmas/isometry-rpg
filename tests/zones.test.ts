@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type Monster, type World, type ZoneKind, EXIT_RANGE, HOLLOW_BORDER, MINES_MIN_LEVEL, MONSTER_KINDS, MONSTER_LEASH,
-  MONSTER_RESPAWN_TIME, PLAYER_MAX_HP, REGIONS, ROAD_ROW, WORLD_HEIGHT, WORLD_WIDTH, characterOf, circleFree,
+  type Monster, type World, type ZoneKind, EXIT_RANGE, MINES_MIN_LEVEL, PLAYER_SPEED, REGION_SITES, TILE_ROCK, TILE_RUIN, TILE_WATER, MONSTER_KINDS, MONSTER_LEASH,
+  MONSTER_RESPAWN_TIME, PLAYER_MAX_HP, REGIONS, WORLD_HEIGHT, WORLD_WIDTH, characterOf, circleFree,
   createWorld, findPath, isRoad, isWalkable, minesLevelFor, monsterMaxHp, monsterXp, nearestExit,
   newCharacter, regionAt, step, travelerOf,
 } from '../src/sim';
@@ -12,16 +12,16 @@ const tile = (p: { x: number; y: number }) => ({ x: Math.round(p.x), y: Math.rou
 const run = (world: World, ticks: number) => {
   for (let i = 0; i < ticks; i++) step(world);
 };
-/** A lone monster placed relative to the hero, on open ground east of the village. */
+/** A lone wolf placed relative to the hero, on ground cleared for the purpose out on the moor. */
 function meadow(dx: number, dy: number): { world: World; monster: Monster } {
   const world = build('overworld');
   const { map } = world;
-  const at = { x: 40, y: ROAD_ROW };
+  const at = { x: 60, y: 24 };
   for (let y = at.y - 20; y <= at.y + 20; y++) {
     for (let x = at.x - 8; x <= at.x + 17; x++) map.tiles[y * map.width + x] = 0;
   }
   world.player.pos = { ...at };
-  const monster: Monster = { ...(world.monsters[0] as Monster), id: 0, home: { x: at.x + dx, y: at.y + dy }, pos: { x: at.x + dx, y: at.y + dy } };
+  const monster: Monster = { ...(world.monsters[0] as Monster), id: 0, kind: 'wolf', elder: false, rest: 100000, home: { x: at.x + dx, y: at.y + dy }, pos: { x: at.x + dx, y: at.y + dy } };
   world.monsters = [monster];
   return { world, monster };
 }
@@ -54,25 +54,39 @@ describe('open world', () => {
     }
   });
 
-  it('has a road from the village gate to the mine door with nothing on it', () => {
+  it('has a winding road from the village gate to the mine door with nothing on it', () => {
     const door = world.exits[0]!.pos;
-    expect(door.y).toBe(ROAD_ROW);
-    for (let x = Math.round(world.player.pos.x); x <= door.x; x++) expect(isWalkable(world.map, x, ROAD_ROW)).toBe(true);
-    expect(isRoad('overworld', 40, ROAD_ROW)).toBe(true);
-    expect(isRoad('overworld', 40, ROAD_ROW + 5)).toBe(false);
-    expect(isRoad('dungeon', 12, ROAD_ROW)).toBe(false);
+    const rows = new Set<number>();
+    for (let x = 34; x <= door.x; x++) {
+      const road = [];
+      for (let y = 0; y < WORLD_HEIGHT; y++) if (isRoad('overworld', x, y)) road.push(y);
+      expect(road.length).toBeGreaterThanOrEqual(2);
+      for (const y of road) expect(isWalkable(world.map, x, y)).toBe(true);
+      rows.add(road[0]!);
+    }
+    // It bends: the road does not keep to one row.
+    expect(rows.size).toBeGreaterThan(5);
+    expect(isRoad('overworld', door.x, door.y)).toBe(true);
+    expect(isRoad('dungeon', 12, door.y)).toBe(false);
   });
 
-  it('separates the moor from the hollow with a tree line that has passes', () => {
-    let walls = 0;
-    let gaps = 0;
-    for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
-      if (isWalkable(world.map, HOLLOW_BORDER, y)) gaps += 1;
-      else walls += 1;
+  it('is shaped by nature, not by a ruler: wavering borders, water, boulders and a ruin', () => {
+    const count = (kind: number) => world.map.tiles.filter((t) => t === kind).length;
+    expect(count(TILE_WATER)).toBeGreaterThan(100);
+    expect(count(TILE_ROCK)).toBeGreaterThan(20);
+    expect(count(TILE_RUIN)).toBeGreaterThan(8);
+    // Where the moor gives way to the hollow differs from column to column.
+    const ends = new Set<number>();
+    for (let x = 52; x < 88; x++) {
+      let y = 10;
+      while (y < WORLD_HEIGHT && regionAt('overworld', { x, y }).id === 'moor') y += 1;
+      ends.add(y);
     }
-    expect(gaps).toBeGreaterThanOrEqual(4);
-    expect(walls).toBeGreaterThan(gaps * 4);
-    expect(isWalkable(world.map, HOLLOW_BORDER, ROAD_ROW)).toBe(true);
+    expect(ends.size).toBeGreaterThan(6);
+    // Between a third and two thirds of the wilds is open ground: woods with room to walk.
+    const open = world.map.tiles.filter((t) => t === 0).length / world.map.tiles.length;
+    expect(open).toBeGreaterThan(0.4);
+    expect(open).toBeLessThan(0.8);
   });
 });
 
@@ -81,8 +95,7 @@ describe('regions', () => {
 
   it('give every point of the world a region', () => {
     expect(regionAt('overworld', world.player.pos).id).toBe('village');
-    expect(regionAt('overworld', { x: 40, y: 10 }).id).toBe('moor');
-    expect(regionAt('overworld', { x: HOLLOW_BORDER + 5, y: 40 }).id).toBe('hollow');
+    for (const id of ['pasture', 'moor', 'hollow', 'thicket'] as const) expect(regionAt('overworld', REGION_SITES[id]).id).toBe(id);
     expect(regionAt('dungeon', { x: 3, y: 3 }).id).toBe('mines');
   });
 
@@ -98,8 +111,9 @@ describe('regions', () => {
       expect(monster.level).toBeLessThanOrEqual(max);
       expect(monster.maxHp).toBe(monsterMaxHp(monster.level, monster.kind, monster.elder));
     }
-    expect([...seen].sort()).toEqual(['hollow', 'moor']);
-    expect(REGIONS.hollow.levels![0]).toBeGreaterThan(REGIONS.moor.levels![1]);
+    expect([...seen].sort()).toEqual(['hollow', 'moor', 'pasture', 'thicket']);
+    expect(REGIONS.moor.levels![0]).toBeGreaterThan(REGIONS.pasture.levels![1]);
+    expect(REGIONS.thicket.levels![1]).toBeGreaterThan(REGIONS.hollow.levels![1]);
   });
 
   it('do not scale the open world to the hero', () => {
@@ -111,7 +125,12 @@ describe('regions', () => {
     expect(monsterMaxHp(3, 'wolf')).toBeLessThan(monsterMaxHp(3, 'grunt'));
     expect(monsterXp(3, 'wolf')).toBeLessThan(monsterXp(3, 'boar'));
     expect(MONSTER_KINDS.wolf.speed).toBeGreaterThan(MONSTER_KINDS.boar.speed);
-    for (const kind of Object.values(MONSTER_KINDS)) expect(kind.speed).toBeLessThan(4.5); // the hero can always run away
+    // A wolf cannot be outrun; a boar can.
+    expect(MONSTER_KINDS.wolf.speed).toBeGreaterThan(PLAYER_SPEED);
+    expect(MONSTER_KINDS.boar.speed).toBeLessThan(PLAYER_SPEED);
+    // The first prey of a new hero and the boars mind their own business; wolves and tuskers do not.
+    expect([MONSTER_KINDS.wolfPup.aggro, MONSTER_KINDS.boar.aggro]).toEqual([0, 0]);
+    expect(Math.min(MONSTER_KINDS.wolf.aggro, MONSTER_KINDS.tusker.aggro)).toBeGreaterThan(3);
   });
 });
 
@@ -127,11 +146,11 @@ describe('the village', () => {
 
   it('is never entered by a hunting monster: the chase ends at the gate', () => {
     const world = build('overworld');
-    const monster: Monster = { ...(world.monsters[0] as Monster), id: 0, aggro: true };
+    const monster: Monster = { ...(world.monsters[0] as Monster), id: 0, kind: 'wolf', aggro: true };
     monster.pos = { x: world.player.pos.x + 3, y: world.player.pos.y };
-    monster.home = { x: 40, y: ROAD_ROW };
+    monster.home = { x: 45, y: 41 };
     world.monsters = [monster];
-    run(world, 40);
+    run(world, 5);
     expect(world.player.hp).toBe(PLAYER_MAX_HP);
     expect(world.monsters[0]).toMatchObject({ aggro: false, returning: true });
   });
@@ -240,7 +259,7 @@ describe('going in and out of the mines', () => {
   it('brings the hero out at the mine door, not in the village', () => {
     const outside = build('overworld', 5, 'dungeon');
     expect(outside.player.pos).toEqual(outside.exits[0]!.pos);
-    expect(regionAt('overworld', outside.player.pos).id).toBe('hollow');
+    expect(regionAt('overworld', outside.player.pos).id).toBe('thicket');
     expect(nearestExit(outside)?.to).toBe('dungeon');
     for (const monster of outside.monsters) {
       expect(Math.hypot(monster.pos.x - outside.player.pos.x, monster.pos.y - outside.player.pos.y)).toBeGreaterThanOrEqual(5);

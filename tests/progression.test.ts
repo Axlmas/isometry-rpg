@@ -215,6 +215,8 @@ describe('skills', () => {
     const dealt = (skill: boolean, distance: number) => {
       const world = arena([[distance, 0]], 10);
       (world.monsters[0] as Monster).hp = (world.monsters[0] as Monster).maxHp = 10000;
+      // A peaceful beast at rest: it stays where it was put.
+      Object.assign(world.monsters[0] as Monster, { kind: 'boar', elder: false, rest: 1000 });
       step(world, [skill ? { type: 'skill', id: 'heavyBlow', dx: 1, dy: 0 } : { type: 'attack', dx: 1, dy: 0 }]);
       land(world);
       return 10000 - (world.monsters[0] as Monster).hp;

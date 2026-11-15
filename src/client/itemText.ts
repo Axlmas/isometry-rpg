@@ -35,6 +35,11 @@ export const ITEM_NAME: Record<Exclude<ItemId, 'coins' | RecipeItemId>, MessageK
   silverRing: 'item.silverRing',
   boneAmulet: 'item.boneAmulet',
   silverAmulet: 'item.silverAmulet',
+  firstHuntCharm: 'item.firstHuntCharm',
+  packFang: 'item.packFang',
+  bristleGrips: 'item.bristleGrips',
+  tuskRing: 'item.tuskRing',
+  overseerSignet: 'item.overseerSignet',
   healthPotion: 'item.healthPotion',
   manaPotion: 'item.manaPotion',
   chargePlain: 'item.chargePlain',
@@ -85,6 +90,9 @@ export const QUALITY_COLOR: Record<Quality, number> = {
   rare: 0x5fa8ff,
   epic: 0xc58bff,
 };
+
+/** A trophy's name is written in its own colour, whatever quality it rolled. */
+export const UNIQUE_CSS = '#e8a23a';
 
 export function qualityCss(quality: Quality): string {
   return `#${QUALITY_COLOR[quality].toString(16).padStart(6, '0')}`;

@@ -1,14 +1,17 @@
 import type { I18n } from '../i18n';
-import { type ItemId, type MonsterKind, type World, DROP_TABLES, REGIONS, isNear } from '../sim';
+import { type ItemId, type MonsterKind, type World, DROP_TABLES, MASTERY_DAMAGE, MASTERY_RARE, MASTERY_TIERS, MONSTER_KINDS, REGIONS, isNear, masteryTier } from '../sim';
 import { itemIcon } from './itemIcon';
 import { element, itemName, make } from './itemView';
 import { MONSTER_NAME } from './npcText';
+import { UNIQUE_CSS } from './itemText';
 import { REGION_NAME } from './zoneText';
 
 /** Where each kind of monster lives, in the order the hero meets them. */
 const HABITAT: ReadonlyArray<{ kind: MonsterKind; region: keyof typeof REGIONS }> = [
+  { kind: 'wolfPup', region: 'pasture' },
   { kind: 'wolf', region: 'moor' },
   { kind: 'boar', region: 'hollow' },
+  { kind: 'tusker', region: 'thicket' },
   { kind: 'grunt', region: 'mines' },
 ];
 
@@ -19,6 +22,7 @@ const HABITAT: ReadonlyArray<{ kind: MonsterKind; region: keyof typeof REGIONS }
  */
 export class HunterPanel {
   private drawnLocale = '';
+  private world: World | null = null;
 
   constructor(
     private readonly i18n: I18n,
@@ -39,13 +43,17 @@ export class HunterPanel {
 
   /** Closes the window when the hero walks away. */
   update(world: World): void {
+    this.world = world;
     if (this.isOpen && (!isNear(world, 'hunter') || world.player.hp <= 0)) this.toggle(false);
+    this.render();
   }
 
   render(force = false): void {
     const { i18n } = this;
-    if (!this.isOpen || (!force && this.drawnLocale === i18n.locale)) return;
-    this.drawnLocale = i18n.locale;
+    const kills = this.world?.player.kills;
+    const state = `${i18n.locale}/${kills ? Object.values(kills).join(',') : ''}`;
+    if (!this.isOpen || (!force && this.drawnLocale === state)) return;
+    this.drawnLocale = state;
     const percent = new Intl.NumberFormat(i18n.locale === 'en-XA' ? 'en' : i18n.locale, { maximumFractionDigits: 1 });
 
     element('hunter-list').replaceChildren(
@@ -57,8 +65,23 @@ export class HunterPanel {
         block.append(
           make('strong', 'item-name', i18n.t(MONSTER_NAME[kind])),
           make('span', 'item-detail', levels ? i18n.t('hunter.where', { zone: where, min: levels[0], max: levels[1] }) : i18n.t('hunter.whereAny', { zone: where })),
+          make('span', 'item-detail', [
+            MONSTER_KINDS[kind].aggro > 0 ? i18n.t('hunter.temperAggressive') : i18n.t('hunter.temperPeaceful'),
+            ...(MONSTER_KINDS[kind].social > 0 ? [i18n.t('hunter.social')] : []),
+          ].join(' · ')),
           make('span', 'item-price', i18n.t('hunter.coins', { min: table.coins[0], max: table.coins[1] })),
         );
+        // How well the hero knows this beast, and what knowing it better will give.
+        const killed = kills?.[kind] ?? 0;
+        const tier = masteryTier(killed);
+        block.append(make('span', 'item-affix', i18n.t('hunter.kills', { count: killed, tier, max: MASTERY_TIERS.length })));
+        const needed = MASTERY_TIERS[tier];
+        if (needed !== undefined) block.append(make('span', 'item-detail', i18n.t('hunter.next', { needed, bonus: Math.round((tier + 1) * MASTERY_DAMAGE * 100) })));
+        if (table.rare.itemId !== 'coins') {
+          const trophy = make('span', 'item-detail', i18n.t('hunter.trophy', { item: itemName(i18n, table.rare.itemId), chance: table.rare.chance + tier * MASTERY_RARE, elder: table.rare.elderChance }));
+          trophy.style.color = UNIQUE_CSS;
+          block.append(trophy);
+        }
         const drops = make('ul', 'item-list');
         for (const entry of table.drops) {
           // Each item of a line is equally likely, so its own chance is the line's chance shared out.

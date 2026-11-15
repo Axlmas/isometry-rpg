@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parseSave, serializeWorld } from '../src/client/save';
 import {
   type ItemMods, type Monster, type World,
-  AFFIX_RANGE, CRIT_BASE, CRIT_MULTIPLIER, ELDER, ITEMS, MONSTER_LINK_RANGE, PACK_RADIUS, PLAYER_ATTACK_COOLDOWN, QUALITIES, QUALITY, REGIONS,
-  addItem, affixCount, attackCooldown, createRng, createWorld, critChance, droppableEquipment, gearStats, monsterMaxHp, monsterXp, newHero,
-  playerDamage, playerDefense, refreshVitals, regionAt, rollMods, sellPrice, step, validMods, worthOf,
+  AFFIX_RANGE, CRIT_BASE, CRIT_MULTIPLIER, DROP_TABLES, ELDER, ITEMS, MASTERY_TIERS, MONSTER_KINDS, MONSTER_KIND_IDS, MONSTER_SPACING, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_SLOW, QUALITIES, QUALITY,
+  addItem, affixCount, attackCooldown, createRng, createWorld, critChance, droppableEquipment, gearStats, isUnique, masteryTier, monsterMaxHp, monsterXp, newHero,
+  playerDamage, playerDefense, refreshVitals, rollMods, sellPrice, step, validMods, worthOf,
 } from '../src/sim';
 
 const equipment = (id: keyof typeof ITEMS) => ITEMS[id] as Extract<(typeof ITEMS)[keyof typeof ITEMS], { kind: 'equipment' }>;
@@ -178,43 +178,131 @@ describe('critical blows', () => {
   });
 });
 
-describe('packs and elders', () => {
-  it('settles open-world monsters in packs of the region\'s size, close together', () => {
+describe('who comes when one is attacked', () => {
+  /** Open ground on the moor with the given monsters around the hero. */
+  function field(kind: Monster['kind'], offsets: Array<[number, number]>): World {
     const world = overworld();
-    const packs = new Map<number, Monster[]>();
-    for (const monster of world.monsters) packs.set(monster.pack, [...(packs.get(monster.pack) ?? []), monster]);
-    let full = 0;
-    for (const members of packs.values()) {
-      const region = regionAt('overworld', members[0]!.home);
-      expect(members.length).toBeLessThanOrEqual(region.pack);
-      if (members.length === region.pack) full += 1;
-      for (const member of members) {
-        expect(regionAt('overworld', member.home)).toBe(region);
-        expect(member.level).toBe(members[0]!.level);
-        expect(Math.hypot(member.home.x - members[0]!.home.x, member.home.y - members[0]!.home.y)).toBeLessThanOrEqual(PACK_RADIUS);
+    const { map } = world;
+    const at = { x: 60, y: 24 };
+    for (let y = at.y - 15; y <= at.y + 15; y++) for (let x = at.x - 15; x <= at.x + 15; x++) map.tiles[y * map.width + x] = 0;
+    world.player.pos = { ...at };
+    const template = world.monsters[0] as Monster;
+    world.monsters = offsets.map(([dx, dy], id) => ({ ...template, id, kind, elder: false, rest: 100000, hp: 100000, maxHp: 100000, home: { x: at.x + dx, y: at.y + dy }, pos: { x: at.x + dx, y: at.y + dy } }));
+    return world;
+  }
+
+  it('spreads monsters out singly, at uneven distances, never on top of each other', () => {
+    const world = overworld();
+    const nearest = world.monsters.map((monster) =>
+      Math.min(...world.monsters.filter((other) => other !== monster).map((other) => Math.hypot(other.home.x - monster.home.x, other.home.y - monster.home.y))));
+    for (const gap of nearest) expect(gap).toBeGreaterThanOrEqual(MONSTER_SPACING);
+    // Some stand in a crowd, some alone: how many a fight draws depends on where it starts.
+    expect(nearest.filter((gap) => gap < 3.2).length).toBeGreaterThan(10);
+    expect(nearest.filter((gap) => gap > 4).length).toBeGreaterThan(10);
+  });
+
+  it('leaves the hero alone if the kind is peaceful, until one is struck', () => {
+    const world = field('boar', [[1, 0], [3, 0], [9, 0]]);
+    for (let i = 0; i < 60; i++) step(world);
+    expect(world.monsters.some((monster) => monster.aggro)).toBe(false);
+    step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
+    for (let i = 0; i < 4; i++) step(world);
+    // The struck boar and the one within earshot turn on the hero; the far one grazes on.
+    expect(world.monsters.map((monster) => monster.aggro)).toEqual([true, true, false]);
+  });
+
+  it('is attacked on sight by an aggressive kind, which calls only kin within earshot', () => {
+    const sight = MONSTER_KINDS.wolf.aggro;
+    const earshot = MONSTER_KINDS.wolf.social;
+    const world = field('wolf', [[sight - 0.5, 0], [sight - 0.5 + earshot - 0.3, 0], [sight - 0.5 + earshot * 2 + 1, 0]]);
+    step(world);
+    expect(world.monsters.map((monster) => monster.aggro)).toEqual([true, true, false]);
+    // The one who answered the call does not pass it on.
+    for (let i = 0; i < 5; i++) step(world);
+    expect(world.monsters[2]!.aggro).toBe(false);
+  });
+
+  it('a sweeping skill still hits everything around, unlike an ordinary blow', () => {
+    const world = field('boar', [[1, 0], [-1, 0], [0, 1]]);
+    world.player.level = 4;
+    world.player.skills.push('sweep');
+    world.player.mp = 100;
+    step(world, [{ type: 'skill', id: 'sweep', dx: 1, dy: 0 }]);
+    for (let i = 0; i < 4; i++) step(world);
+    expect(world.monsters.every((monster) => monster.hp < monster.maxHp)).toBe(true);
+  });
+
+  it('slows the hero while striking: fight or run, not both', () => {
+    const walked = (attacking: boolean) => {
+      const world = field('boar', []);
+      const from = world.player.pos.x;
+      for (let i = 0; i < 40; i++) step(world, [{ type: 'moveDir', dx: 1, dy: 0 }, ...(attacking ? [{ type: 'attack', dx: 1, dy: 0 } as const] : [])]);
+      return world.player.pos.x - from;
+    };
+    expect(walked(true)).toBeLessThan(walked(false) * (PLAYER_ATTACK_SLOW + 0.1));
+  });
+});
+
+describe('hunting mastery and trophies', () => {
+  it('counts kills by kind and makes the hero better against that kind, tier by tier', () => {
+    const world = overworld();
+    const { map } = world;
+    for (let y = 1; y < map.height - 1; y++) for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;
+    const template = world.monsters[0] as Monster;
+    const tiers: number[] = [];
+    for (let i = 0; i < MASTERY_TIERS[0]!; i++) {
+      world.monsters = [{ ...template, id: i, kind: 'wolf', elder: false, hp: 1, pos: { x: world.player.pos.x + 1, y: world.player.pos.y }, home: { ...world.player.pos } }];
+      step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
+      for (let t = 0; t < 12 && world.monsters.length > 0; t++) step(world);
+      for (let t = 0; t < 12; t++) {
+        step(world);
+        for (const event of world.events) if (event.type === 'masteryUp') tiers.push(event.tier);
       }
+      world.player.hp = world.player.maxHp;
     }
-    // Most packs are complete; a few at the edge of a wood are short.
-    expect(full / packs.size).toBeGreaterThan(0.8);
-    expect(REGIONS.moor.pack).toBeGreaterThan(REGIONS.hollow.pack);
+    expect(world.player.kills.wolf).toBe(MASTERY_TIERS[0]);
+    expect(world.player.kills.boar).toBe(0);
+    expect(masteryTier(world.player.kills.wolf)).toBe(1);
+    expect(masteryTier(MASTERY_TIERS[MASTERY_TIERS.length - 1]!)).toBe(MASTERY_TIERS.length);
+    expect(masteryTier(0)).toBe(0);
   });
 
-  it('brings the whole pack when one of them notices the hero, but not the whole field', () => {
+  it('keeps the kill count through saving and loading', () => {
+    const world = overworld(5);
+    world.player.kills.wolf = 73;
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status).toBe('ok');
+    if (loaded.status === 'ok') expect(loaded.world.player.kills).toEqual({ ...world.player.kills, wolf: 73 });
+    expect(parseSave(serializeWorld(world).replace('"wolf":73', '"wolf":-1')).status).toBe('damaged');
+  });
+
+  it('gives every kind of monster a trophy of its own that nothing else drops', () => {
+    const trophies = MONSTER_KIND_IDS.map((kind) => DROP_TABLES[kind].rare.itemId);
+    expect(new Set(trophies).size).toBe(MONSTER_KIND_IDS.length);
+    for (const itemId of trophies) {
+      expect(isUnique(itemId)).toBe(true);
+      for (const kind of MONSTER_KIND_IDS) expect(DROP_TABLES[kind].drops.some((entry) => entry.items.includes(itemId))).toBe(false);
+      expect(droppableEquipment('none')).not.toContain(itemId);
+      expect(droppableEquipment('d')).not.toContain(itemId);
+    }
+    // Rare from an ordinary monster, a real hope from an elder.
+    for (const kind of MONSTER_KIND_IDS) {
+      expect(DROP_TABLES[kind].rare.chance).toBeLessThanOrEqual(10);
+      expect(DROP_TABLES[kind].rare.elderChance).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it('a worn trophy gives what it promises', () => {
     const world = overworld();
-    const first = world.monsters.find((monster) => world.monsters.filter((other) => other.pack === monster.pack).length === REGIONS.moor.pack)!;
-    world.player.pos = { x: first.home.x + 0.5, y: first.home.y + 0.5 };
-    for (let i = 0; i < 3; i++) step(world);
-    const pack = world.monsters.filter((monster) => monster.pack === first.pack);
-    expect(pack.every((monster) => monster.aggro)).toBe(true);
-    const hunting = world.monsters.filter((monster) => monster.aggro);
-    expect(hunting.length).toBeLessThan(12);
-    // Everyone hunting was either in sight of the hero or within call of someone who was.
-    for (const monster of hunting) {
-      const reach = Math.min(...pack.map((mate) => Math.hypot(mate.home.x - monster.home.x, mate.home.y - monster.home.y)));
-      expect(reach).toBeLessThanOrEqual(MONSTER_LINK_RANGE * 3 + 5);
-    }
+    const before = { crit: critChance(world.player), cooldown: attackCooldown(world.player) };
+    addItem(world.player, 'packFang', 1);
+    step(world, [{ type: 'equip', index: 0 }]);
+    expect(critChance(world.player)).toBe(before.crit + 6);
+    expect(attackCooldown(world.player)).toBeLessThan(before.cooldown);
   });
+});
 
+describe('elders', () => {
   it('has a few elders: much tougher, and worth much more', () => {
     const world = overworld();
     const elders = world.monsters.filter((monster) => monster.elder);
@@ -238,7 +326,7 @@ describe('packs and elders', () => {
       expect(world.monsters).toEqual([]);
       // Whatever fell at the hero's feet is already in the bag.
       const found = world.loot.filter((loot) => loot.itemId !== 'coins').length + world.player.inventory.length;
-      expect(found).toBeLessThanOrEqual(ELDER.drops);
+      expect(found).toBeLessThanOrEqual(ELDER.drops + 1); // and, with luck, the trophy
       items += found;
       expect(types(world)).not.toContain('playerDied');
     }

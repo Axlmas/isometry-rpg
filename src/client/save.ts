@@ -1,6 +1,6 @@
 import {
-  type Character, type ClassId, type EquipSlot, type RaceId, type ItemId, type ItemMods, type ItemStack, type RecipeId, type SkillId, type World, type ZoneKind,
-  CLASSES, ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, NO_ENCHANT, NO_GEAR, RECIPES, SKILLS, PLAYER_RADIUS,
+  type Character, type ClassId, type EquipSlot, type MonsterKind, type RaceId, type ItemId, type ItemMods, type ItemStack, type RecipeId, type SkillId, type World, type ZoneKind,
+  CLASSES, ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, MONSTER_KIND_IDS, NO_ENCHANT, NO_GEAR, RECIPES, SKILLS, PLAYER_RADIUS,
   circleFree, createWorld, isClassId, isItemId, isRaceId, isRecipeId, isSkillId, isZoneKind, maxStackOf, copyMods, validMods, xpToNextLevel,
 } from '../sim';
 
@@ -9,7 +9,7 @@ import {
  * older save is not converted: the player starts a new hero. Once the game
  * has real players, add a migration step here instead.
  */
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -49,6 +49,8 @@ interface SaveData {
   enchants: Record<EquipSlot, number>;
   /** Quality and properties of each worn item; null for a plain one. */
   mods: Record<EquipSlot, ItemMods | null>;
+  /** Monsters killed, by kind. */
+  kills: Record<MonsterKind, number>;
   /** Skills learned from the trainer. */
   skills: SkillId[];
   /** Recipes learned from recipe items. */
@@ -108,6 +110,7 @@ export function serializeWorld(world: World): string {
     equipment: { ...world.player.equipment },
     enchants: { ...world.player.equipmentEnchant },
     mods: { ...world.player.equipmentMods },
+    kills: { ...world.player.kills },
     skills: [...world.player.skills],
     recipes: [...world.player.recipes],
     loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, ...(loot.enchant ? { enchant: loot.enchant } : {}), ...(loot.mods ? { mods: loot.mods } : {}), x: loot.pos.x, y: loot.pos.y })),
@@ -142,7 +145,7 @@ function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
 }
 
 function parseCharacter(data: Record<string, unknown>): Character | null {
-  const { race, cls, level, xp, coins, inventory, equipment, enchants, mods, skills, recipes } = data;
+  const { race, cls, level, xp, coins, inventory, equipment, enchants, mods, skills, recipes, kills } = data;
   if (!isRaceId(race) || !isClassId(cls)) return null;
   if (!isInt(level) || level < 1 || level > MAX_LEVEL) return null;
   // Experience at or above the next level's threshold cannot come from normal play.
@@ -190,13 +193,20 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
     if (!def || def.kind !== 'equipment' || !validMods(def, value)) return null;
     equipmentMods[slot] = copyMods(value) ?? null;
   }
+  if (!isRecord(kills) || Object.keys(kills).length !== MONSTER_KIND_IDS.length) return null;
+  const killed = {} as Record<MonsterKind, number>;
+  for (const kind of MONSTER_KIND_IDS) {
+    const count = kills[kind];
+    if (!isInt(count) || count < 0) return null;
+    killed[kind] = count;
+  }
   // A skill can only have been learned once, and not before its level.
   if (!Array.isArray(skills) || new Set(skills).size !== skills.length) return null;
   if (!skills.every((id) => isSkillId(id) && SKILLS[id].unlockLevel <= level && SKILLS[id].cls === cls)) return null;
   // Only recipes that have to be learned can be in the list, each once.
   if (!Array.isArray(recipes) || new Set(recipes).size !== recipes.length) return null;
   if (!recipes.every((id) => isRecipeId(id) && RECIPES[id].mustLearn)) return null;
-  return { race, cls, level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, equipmentMods, skills: skills as SkillId[], recipes: recipes as RecipeId[] };
+  return { race, cls, level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, equipmentMods, kills: killed, skills: skills as SkillId[], recipes: recipes as RecipeId[] };
 }
 
 /** Saved data can be edited or corrupted, so every field is checked. */

@@ -1,5 +1,5 @@
-import { type World, TILE_WALL, isRoad, regionAt, tileAt } from '../sim';
-import { REGION_LOOK, ROAD_COLOR } from './zoneText';
+import { type World, TILE_FLOOR, TILE_WATER, isRoad, regionAt, tileAt } from '../sim';
+import { REGION_LOOK, ROAD_COLOR, WATER_COLOR } from './zoneText';
 
 /** Pixels per tile before the map is turned and squashed to match the game view. */
 const SCALE = 5;
@@ -31,8 +31,9 @@ export class Minimap {
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const look = REGION_LOOK[regionAt(zone, { x, y }).id];
-        const wall = tileAt(map, x, y) === TILE_WALL;
-        ctx.fillStyle = wall ? css(look.floor, look.walls === 'trees' ? 0.55 : 0.3) : css(isRoad(zone, x, y) ? ROAD_COLOR : look.floor);
+        const tile = tileAt(map, x, y);
+        const wall = tile !== TILE_FLOOR && tile !== TILE_WATER;
+        ctx.fillStyle = tile === TILE_WATER ? css(WATER_COLOR) : wall ? css(look.floor, look.walls === 'trees' ? 0.55 : 0.3) : css(isRoad(zone, x, y) ? ROAD_COLOR : look.floor);
         ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
       }
     }

@@ -58,7 +58,8 @@ describe('drop tables', () => {
         expect(coins).toHaveLength(1);
         expect(coins[0]!.count).toBeGreaterThanOrEqual(table.coins[0]);
         expect(coins[0]!.count).toBeLessThanOrEqual(table.coins[1]);
-        const others = world.loot.filter((l) => l.itemId !== 'coins');
+        // The trophy is rolled apart from the table and has a test of its own.
+        const others = world.loot.filter((l) => l.itemId !== 'coins' && l.itemId !== table.rare.itemId);
         expect(others.length).toBeLessThanOrEqual(1);
         for (const loot of others) expect(allowed.has(loot.itemId), `${kind} dropped ${loot.itemId}`).toBe(true);
         withItem += others.length;

@@ -1,5 +1,5 @@
 import {
-  CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
+  CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_SLOW, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
   PLAYER_RADIUS, PLAYER_REGEN_DELAY, PLAYER_REGEN_INTERVAL, PLAYER_SPEED, SAFE_REGEN_INTERVAL, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
@@ -104,6 +104,7 @@ function applyCommand(world: World, command: Command): void {
         range: PLAYER_ATTACK_RANGE,
         multiplier: charged ? CHARGE_DAMAGE_MULTIPLIER : 1,
         charged,
+        cleave: false,
         shot: ranged ? { count: 1, spread: 0, pierce: false, splash: 0 } : null,
       };
       world.events.push(ranged ? { type: 'playerShot', dir, charged } : { type: 'playerSwing', dir, charged });
@@ -158,7 +159,9 @@ function movePlayer(world: World): void {
   const { player, map } = world;
   const before = { ...player.pos };
   const haste = player.hasteTicks > 0 ? player.hasteFactor : 1;
-  let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * (1 + gearStats(player).speed / 100) * TICK_MS) / 1000;
+  // Striking roots the hero for a moment: one can fight or run, not both at once.
+  const striking = player.attackCooldown > 0 || player.pendingAttack !== null ? PLAYER_ATTACK_SLOW : 1;
+  let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * striking * (1 + gearStats(player).speed / 100) * TICK_MS) / 1000;
 
   if (player.moveDir.x !== 0 || player.moveDir.y !== 0) {
     player.pos = pushOutOfWalls(

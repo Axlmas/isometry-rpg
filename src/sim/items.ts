@@ -1,6 +1,7 @@
 import type { MonsterKind } from './balance';
 import type { WeaponType } from './classes';
 import type { RecipeId } from './crafting';
+import type { Affix } from './mods';
 /**
  * Item catalogue. IDs are stable: saves, rules and drop tables use them, and
  * the client maps them to names and art. Never rename or reuse an ID that has
@@ -26,6 +27,7 @@ export type ItemId =
   | 'leatherBoots' | 'ironGreaves'
   | 'leatherGloves' | 'ironGauntlets'
   | 'copperRing' | 'silverRing' | 'boneAmulet' | 'silverAmulet'
+  | 'firstHuntCharm' | 'packFang' | 'bristleGrips' | 'tuskRing' | 'overseerSignet'
   | 'healthPotion' | 'manaPotion' | 'chargePlain' | 'chargeD'
   | 'crystalD'
   | 'scrollWeaponPlain' | 'scrollArmorPlain' | 'scrollWeaponD' | 'scrollArmorD'
@@ -51,7 +53,8 @@ export type ItemDef =
   | { id: ItemId; kind: 'scroll'; maxStack: number; price: number; target: 'weapon' | 'armor'; grade: Grade }
   /** `weaponType` decides which class can wield it and how it attacks. */
   | { id: ItemId; kind: 'equipment'; slot: 'weapon'; weaponType: WeaponType; grade: Grade; damage: readonly [number, number]; price: number }
-  | { id: ItemId; kind: 'equipment'; slot: Exclude<EquipSlot, 'weapon'>; grade: Grade; defense: number; price: number };
+  /** `unique` marks a one-of-a-kind trophy: properties it always has, besides whatever it rolls. Only its own monster drops it. */
+  | { id: ItemId; kind: 'equipment'; slot: Exclude<EquipSlot, 'weapon'>; grade: Grade; defense: number; price: number; unique?: readonly Affix[] };
 
 const MATERIAL_STACK = 99;
 const POTION_STACK = 99;
@@ -95,6 +98,13 @@ export const ITEMS: Readonly<Record<ItemId, ItemDef>> = {
   silverRing: { id: 'silverRing', kind: 'equipment', slot: 'ring', grade: 'd', defense: 0, price: 480 },
   boneAmulet: { id: 'boneAmulet', kind: 'equipment', slot: 'amulet', grade: 'none', defense: 0, price: 90 },
   silverAmulet: { id: 'silverAmulet', kind: 'equipment', slot: 'amulet', grade: 'd', defense: 0, price: 480 },
+  // Trophies: each comes from one kind of monster only, and rarely.
+  firstHuntCharm: { id: 'firstHuntCharm', kind: 'equipment', slot: 'amulet', grade: 'none', defense: 0, price: 300, unique: [{ stat: 'hp', value: 18 }, { stat: 'speed', value: 4 }] },
+  packFang: { id: 'packFang', kind: 'equipment', slot: 'amulet', grade: 'none', defense: 0, price: 700, unique: [{ stat: 'crit', value: 6 }, { stat: 'haste', value: 8 }] },
+  bristleGrips: { id: 'bristleGrips', kind: 'equipment', slot: 'gloves', grade: 'none', defense: 2, price: 900, unique: [{ stat: 'power', value: 8 }, { stat: 'hp', value: 25 }] },
+  tuskRing: { id: 'tuskRing', kind: 'equipment', slot: 'ring', grade: 'd', defense: 0, price: 1500, unique: [{ stat: 'power', value: 12 }, { stat: 'crit', value: 5 }] },
+  overseerSignet: { id: 'overseerSignet', kind: 'equipment', slot: 'ring', grade: 'd', defense: 0, price: 1500, unique: [{ stat: 'defense', value: 3 }, { stat: 'hp', value: 40 }, { stat: 'mp', value: 25 }] },
+
   healthPotion: { id: 'healthPotion', kind: 'consumable', maxStack: POTION_STACK, price: 25, effect: { kind: 'heal', amount: 60 } },
   manaPotion: { id: 'manaPotion', kind: 'consumable', maxStack: POTION_STACK, price: 30, effect: { kind: 'mana', amount: 40 } },
   chargePlain: { id: 'chargePlain', kind: 'consumable', maxStack: CHARGE_STACK, price: 1, effect: { kind: 'charge', grade: 'none' } },
@@ -145,11 +155,17 @@ export function crystalsFor(itemId: ItemId): number {
   return def.kind === 'equipment' && def.grade === 'd' ? Math.round(def.price / 30) : 0;
 }
 
+/** True for a trophy: a piece of equipment with properties of its own that only one kind of monster drops. */
+export function isUnique(itemId: ItemId): boolean {
+  const def = ITEMS[itemId];
+  return def.kind === 'equipment' && def.slot !== 'weapon' && def.unique !== undefined;
+}
+
 /** Equipment that monsters can drop, by grade. Starting weapons are never dropped. */
 export function droppableEquipment(grade: Grade): ItemId[] {
   return (Object.keys(ITEMS) as ItemId[]).filter((id) => {
     const def = ITEMS[id];
-    return def.kind === 'equipment' && def.grade === grade && !STARTING_WEAPONS.includes(id);
+    return def.kind === 'equipment' && def.grade === grade && !STARTING_WEAPONS.includes(id) && !isUnique(id);
   });
 }
 
@@ -167,6 +183,12 @@ export interface DropTable {
   coins: readonly [number, number];
   /** Besides coins, a kill gives at most one of these. Chances add up to no more than 100. */
   drops: readonly DropEntry[];
+  /**
+   * The trophy only this kind of monster carries, rolled separately from the
+   * rest: `chance` in a thousand from an ordinary one, `elderChance` in a
+   * hundred from an elder.
+   */
+  rare: { itemId: ItemId; chance: number; elderChance: number };
 }
 
 const one = [1, 1] as const;
@@ -180,15 +202,26 @@ const D_SCROLLS: readonly ItemId[] = ['scrollWeaponD', 'scrollArmorD', 'scrollAr
  * The hunter in the village tells the player what is written here.
  */
 export const DROP_TABLES: Readonly<Record<MonsterKind, DropTable>> = {
+  wolfPup: {
+    coins: [1, 4],
+    drops: [
+      { chance: 40, items: ['leather', 'bone'], count: [1, 1] },
+      { chance: 8, items: ['thread'], count: [1, 2] },
+      { chance: 5, items: POTIONS, count: one },
+      { chance: 3, items: ['leatherCap', 'leatherBoots', 'leatherGloves'], count: one },
+    ],
+    rare: { itemId: 'firstHuntCharm', chance: 5, elderChance: 15 },
+  },
   wolf: {
-    coins: [2, 6],
+    coins: [3, 8],
     drops: [
       { chance: 42, items: ['leather', 'bone'], count: [1, 2] },
       { chance: 12, items: ['thread'], count: [1, 2] },
       { chance: 5, items: POTIONS, count: one },
-      { chance: 3, items: ['leatherCap', 'leatherBoots', 'leatherGloves'], count: one },
+      { chance: 4, items: ['leatherCap', 'leatherBoots', 'leatherGloves', 'leatherJerkin'], count: one },
       { chance: 2, items: ['copperRing', 'boneAmulet'], count: one },
     ],
+    rare: { itemId: 'packFang', chance: 3, elderChance: 12 },
   },
   boar: {
     coins: [5, 12],
@@ -200,6 +233,20 @@ export const DROP_TABLES: Readonly<Record<MonsterKind, DropTable>> = {
       { chance: 8, items: ['chargePlain'], count: [8, 20] },
       { chance: 3, items: PLAIN_SCROLLS, count: one },
     ],
+    rare: { itemId: 'bristleGrips', chance: 3, elderChance: 12 },
+  },
+  tusker: {
+    coins: [9, 20],
+    drops: [
+      { chance: 36, items: ['leather', 'bone', 'ironOre'], count: [1, 3] },
+      { chance: 12, items: droppableEquipment('none'), count: one },
+      { chance: 3, items: droppableEquipment('d'), count: one },
+      { chance: 7, items: POTIONS, count: one },
+      { chance: 8, items: ['chargePlain'], count: [10, 25] },
+      { chance: 4, items: PLAIN_SCROLLS, count: one },
+      { chance: 1, items: D_SCROLLS, count: one },
+    ],
+    rare: { itemId: 'tuskRing', chance: 3, elderChance: 12 },
   },
   grunt: {
     coins: [10, 22],
@@ -213,6 +260,7 @@ export const DROP_TABLES: Readonly<Record<MonsterKind, DropTable>> = {
       { chance: 2, items: D_SCROLLS, count: one },
       { chance: 4, items: RECIPE_ITEMS, count: one },
     ],
+    rare: { itemId: 'overseerSignet', chance: 3, elderChance: 12 },
   },
 };
 

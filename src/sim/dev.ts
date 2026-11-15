@@ -4,7 +4,8 @@ import { rollMods } from './mods';
 import { createRng } from './rng';
 import { grantXp, xpToNextLevel } from './progression';
 import type { World } from './world';
-import { ROAD_ROW, HOLLOW_BORDER } from './zones';
+import { isWalkable } from './grid';
+import { REGION_SITES } from './zones';
 
 /**
  * Shortcuts for testing the game while it is being made. They only work in a
@@ -21,7 +22,7 @@ export type DevAction =
   | { action: 'heal' }
   /** Kills every monster near the hero, with loot and experience as usual. */
   | { action: 'clear' }
-  | { action: 'teleport'; to: 'village' | 'moor' | 'hollow' | 'mines' };
+  | { action: 'teleport'; to: 'village' | 'pasture' | 'moor' | 'hollow' | 'thicket' | 'mines' };
 
 export function runDevAction(world: World, dev: DevAction): void {
   if (!world.dev) return;
@@ -67,13 +68,16 @@ export function runDevAction(world: World, dev: DevAction): void {
     case 'teleport': {
       if (world.zone !== 'overworld' || player.hp <= 0) return;
       const door = world.exits[0]?.pos ?? world.spawn;
-      const places = {
-        village: world.spawn,
-        moor: { x: 40, y: ROAD_ROW },
-        hollow: { x: HOLLOW_BORDER + 6, y: ROAD_ROW },
-        mines: { x: door.x - 1, y: door.y },
-      };
-      player.pos = { ...places[dev.to] };
+      let target = dev.to === 'village' ? world.spawn : dev.to === 'mines' ? { x: door.x - 1, y: door.y } : { x: REGION_SITES[dev.to].x, y: REGION_SITES[dev.to].y };
+      // The heart of a region may be a tree or a pond: step out to the nearest open ground.
+      for (let radius = 0; radius < 12 && !isWalkable(world.map, target.x, target.y); radius++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            if (isWalkable(world.map, target.x + dx, target.y + dy)) target = { x: target.x + dx, y: target.y + dy };
+          }
+        }
+      }
+      player.pos = { ...target };
       player.path = [];
       player.moveDir = { x: 0, y: 0 };
       return;

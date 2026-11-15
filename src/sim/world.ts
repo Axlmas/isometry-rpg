@@ -26,6 +26,8 @@ export interface PendingAttack {
   multiplier: number;
   /** True when a weapon charge was spent on this blow. */
   charged: boolean;
+  /** A sweeping blow hits everything in its arc; an ordinary one only the nearest monster. */
+  cleave: boolean;
   /** For a ranged attack: how many missiles, how wide the fan, and what they do. Null for a melee blow. */
   shot: { count: number; spread: number; pierce: boolean; splash: number } | null;
 }
@@ -63,6 +65,8 @@ export interface Player {
   skills: SkillId[];
   /** Recipes the hero has learned from recipe items. */
   recipes: RecipeId[];
+  /** Monsters killed by the hero's own hand, by kind: the measure of hunting mastery. */
+  kills: Record<MonsterKind, number>;
   /** Ticks of quickened walking left, and how much quicker. */
   hasteTicks: number;
   hasteFactor: number;
@@ -104,8 +108,6 @@ export interface Monster {
   level: number;
   /** A rare, much stronger monster with a richer drop. */
   elder: boolean;
-  /** Monsters of one pack share a number and come to each other's aid. */
-  pack: number;
   /** True once it has raised the alarm (or answered one), so an alarm does not spread without end. */
   called: boolean;
   /** Where the monster lives; it returns here when it loses the hero, and comes back here after dying. */
@@ -124,6 +126,9 @@ export interface Monster {
   slowTicks: number;
   /** Next tile centre on the way around walls, or null when walking straight. */
   waypoint: Point | null;
+  /** Where an idle monster is strolling to, if anywhere, and the ticks it rests before the next stroll. */
+  stroll: Point | null;
+  rest: number;
 }
 
 /**
@@ -145,6 +150,8 @@ export type GameEvent =
   | { type: 'playerHealed'; amount: number }
   | { type: 'xpGained'; amount: number }
   | { type: 'levelUp'; level: number; unlocked: SkillId[] }
+  /** Enough of one kind of monster killed to know it better. */
+  | { type: 'masteryUp'; kind: MonsterKind; tier: number }
   | { type: 'skillUsed'; id: SkillId; dir: Point; charged: boolean }
   | { type: 'itemUsed'; itemId: ItemId }
   | { type: 'useDenied'; itemId: ItemId; reason: 'none' | 'cooldown' | 'notNeeded' }
@@ -282,7 +289,6 @@ export function createWorld(
       kind: spot.kind,
       level: monsterLevel,
       elder: spot.elder,
-      pack: spot.pack,
       called: false,
       home: spot.home,
       pos: { ...spot.home },
@@ -294,6 +300,9 @@ export function createWorld(
       cooldown: 0,
       slowTicks: 0,
       waypoint: null,
+      stroll: null,
+      // Not everyone sets off at the same moment.
+      rest: (id * 37) % 120,
     };
   });
 
@@ -325,6 +334,7 @@ export function createWorld(
       hasteFactor: 1,
       skills: [...(character.skills ?? [])],
       recipes: [...(character.recipes ?? [])],
+      kills: { wolfPup: 0, wolf: 0, boar: 0, tusker: 0, grunt: 0, ...character.kills },
       chargesOn: false,
       potionCooldown: 0,
       facing: { x: 1, y: 1 },

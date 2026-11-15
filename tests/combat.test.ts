@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type Monster, type World, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_WINDUP, MONSTER_COUNT, MONSTER_DAMAGE,
   MONSTER_MAX_HP, MONSTER_MIN_SPAWN_DISTANCE, MONSTER_RADIUS, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_WINDUP,
-  PLAYER_MAX_HP, PLAYER_REGEN_DELAY, circleFree, createWorld, isAlive, isWalkable, step,
+  PLAYER_MAX_HP, PLAYER_REGEN_DELAY, WANDER_RADIUS, circleFree, createWorld, isAlive, isWalkable, step,
 } from '../src/sim';
 
 // The damage of the weapon every hero starts with.
@@ -66,11 +66,12 @@ describe('hero attack', () => {
     expect(world.monsters.map((m) => m.hp)).toEqual([MONSTER_MAX_HP, MONSTER_MAX_HP]);
   });
 
-  it('hits every monster inside the swing', () => {
-    const world = arena([[1, 0.3], [1, -0.3]]);
+  it('hits only the nearest monster inside the swing', () => {
+    const world = arena([[1.1, 0.3], [0.9, -0.2]]);
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
     land(world);
-    for (const monster of world.monsters) expect(monster.hp).toBeLessThan(MONSTER_MAX_HP);
+    expect(world.monsters[0]!.hp).toBe(MONSTER_MAX_HP);
+    expect(world.monsters[1]!.hp).toBeLessThan(MONSTER_MAX_HP);
   });
 
   it('does not hit through a wall', () => {
@@ -131,11 +132,17 @@ describe('hero attack', () => {
 });
 
 describe('monsters', () => {
-  it('stay put until the hero comes close', () => {
+  it('stroll about their homes, never far, until the hero comes close', () => {
     const world = createWorld(11);
-    const before = world.monsters.map((m) => ({ ...m.pos }));
-    run(world, 100);
-    expect(world.monsters.map((m) => m.pos)).toEqual(before);
+    run(world, 600);
+    let moved = 0;
+    for (const monster of world.monsters) {
+      const away = Math.hypot(monster.pos.x - monster.home.x, monster.pos.y - monster.home.y);
+      expect(away).toBeLessThanOrEqual(WANDER_RADIUS + 0.01);
+      expect(monster.aggro).toBe(false);
+      if (away > 0.05) moved += 1;
+    }
+    expect(moved).toBeGreaterThan(0);
     expect(world.player.hp).toBe(PLAYER_MAX_HP);
   });
 
@@ -155,13 +162,13 @@ describe('monsters', () => {
     expect(lost).toBeLessThanOrEqual(MONSTER_DAMAGE[1]);
   });
 
-  it('miss when the hero steps away during the warning', () => {
+  it('keep after the hero during the warning: stepping away does not save from the blow', () => {
     const world = arena([[0.9, 0]]);
     step(world);
     expect(world.events).toContainEqual({ type: 'monsterWindup', id: 0 });
     step(world, [{ type: 'moveDir', dx: -1, dy: 0 }]);
     run(world, MONSTER_ATTACK_WINDUP);
-    expect(world.player.hp).toBe(PLAYER_MAX_HP);
+    expect(world.player.hp).toBeLessThan(PLAYER_MAX_HP);
   });
 
   it('wait between attacks', () => {

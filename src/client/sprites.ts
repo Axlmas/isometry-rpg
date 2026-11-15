@@ -98,8 +98,9 @@ export function drawNpcFigure(g: G, kind: NpcKind): void {
 /** A monster, facing right. `alert` paints it in the warning colour used just before it strikes. */
 export function drawMonsterFigure(g: G, kind: MonsterKind, alert: boolean): void {
   g.lineStyle(1.5, OUTLINE, 1);
-  if (kind === 'wolf') {
-    const fur = alert ? 0xd8663a : 0x8b909a;
+  if (kind === 'wolf' || kind === 'wolfPup') {
+    // The young one is paler and (the scene draws it) smaller.
+    const fur = alert ? 0xd8663a : kind === 'wolfPup' ? 0xa9a294 : 0x7b808a;
     const dark = tint(fur, 0.7);
     drawShadow(g, 34);
     g.fillStyle(dark).fillRect(-11, -8, 3.5, 8).fillRect(7, -8, 3.5, 8);
@@ -117,8 +118,9 @@ export function drawMonsterFigure(g: G, kind: MonsterKind, alert: boolean): void
     g.fillStyle(OUTLINE).fillCircle(21.5, -16, 1.2);
     return;
   }
-  if (kind === 'boar') {
-    const hide = alert ? 0xd8663a : 0x5d4737;
+  if (kind === 'boar' || kind === 'tusker') {
+    // The tusker is a darker, heavier beast with longer tusks.
+    const hide = alert ? 0xd8663a : kind === 'tusker' ? 0x3a3230 : 0x5d4737;
     const dark = tint(hide, 0.65);
     drawShadow(g, 40);
     g.fillStyle(dark).fillRect(-12, -7, 4.5, 7).fillRect(8, -7, 4.5, 7);
@@ -131,7 +133,8 @@ export function drawMonsterFigure(g: G, kind: MonsterKind, alert: boolean): void
     g.fillStyle(tint(hide, 1.15)).fillEllipse(15, -13, 15, 13);
     g.strokeEllipse(15, -13, 15, 13);
     g.fillStyle(0xc98f86).fillEllipse(21.5, -11.5, 5, 6);
-    g.fillStyle(0xf4e9c8).fillTriangle(16, -8, 20, -8, 19, -15); // tusk
+    if (kind === 'tusker') g.fillStyle(0xf4e9c8).fillTriangle(15, -7, 21, -7, 22, -21);
+    else g.fillStyle(0xf4e9c8).fillTriangle(16, -8, 20, -8, 19, -15); // tusk
     g.fillStyle(0xfff2a8).fillCircle(14, -16.5, 1.4);
     return;
   }

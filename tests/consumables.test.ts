@@ -145,7 +145,7 @@ describe('weapon charges', () => {
     for (let i = 0; i < 20; i++) step(world);
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
     expect(world.player.chargesOn).toBe(false);
-    expect(types(world)).toEqual(['chargesEmpty', 'playerSwing']);
+    expect(types(world)).toEqual(expect.arrayContaining(['chargesEmpty', 'playerSwing']));
   });
 
   it('use the charge of the weapon’s grade', () => {

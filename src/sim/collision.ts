@@ -1,4 +1,4 @@
-import { type GridMap, type Point, TILE_WALL, tileAt } from './grid';
+import { type GridMap, type Point, TILE_FLOOR, tileAt } from './grid';
 
 // A tile is a unit square centred on its integer coordinates:
 // tile (3, 5) covers x in [2.5, 3.5] and y in [4.5, 5.5].
@@ -16,7 +16,7 @@ export function circleFree(map: GridMap, p: Point, r: number): boolean {
   const cy = Math.round(p.y);
   for (let ty = cy - 1; ty <= cy + 1; ty++) {
     for (let tx = cx - 1; tx <= cx + 1; tx++) {
-      if (tileAt(map, tx, ty) !== TILE_WALL) continue;
+      if (tileAt(map, tx, ty) === TILE_FLOOR) continue;
       const nx = clamp(p.x, tx - HALF_TILE, tx + HALF_TILE);
       const ny = clamp(p.y, ty - HALF_TILE, ty + HALF_TILE);
       if (Math.hypot(p.x - nx, p.y - ny) < r - EPSILON) return false;
@@ -40,7 +40,7 @@ export function pushOutOfWalls(map: GridMap, p: Point, r: number): Point {
     const cy = Math.round(y);
     for (let ty = cy - 1; ty <= cy + 1; ty++) {
       for (let tx = cx - 1; tx <= cx + 1; tx++) {
-        if (tileAt(map, tx, ty) !== TILE_WALL) continue;
+        if (tileAt(map, tx, ty) === TILE_FLOOR) continue;
         const nx = clamp(x, tx - HALF_TILE, tx + HALF_TILE);
         const ny = clamp(y, ty - HALF_TILE, ty + HALF_TILE);
         const dx = x - nx;

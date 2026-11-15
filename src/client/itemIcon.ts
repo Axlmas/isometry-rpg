@@ -118,6 +118,12 @@ const ICONS: Record<ItemId, string> = {
   boneAmulet: amulet('#8a6a45', '#ece6d6'),
   silverAmulet: amulet('#d5dbe6', '#c58bff'),
 
+  firstHuntCharm: amulet('#8a6a45', '#e8c36a'),
+  packFang: `<path d="M7 4 Q16 16 25 4" fill="none" stroke="#8a6a45" stroke-width="2" stroke-linecap="round"/><path d="M12 12 Q22 12 19 29 Q13 22 12 12 Z" fill="#f1ead8" ${OUTLINE}/>`,
+  bristleGrips: glove('#5d4737', '#e8a23a'),
+  tuskRing: ring('#f1ead8', '#e8a23a'),
+  overseerSignet: ring('#8f97a6', '#e8a23a'),
+
   healthPotion: flask('#d9534f'),
   manaPotion: flask('#4f8fe0'),
   chargePlain: crystal('#cfd3dc', '#ffffff'),

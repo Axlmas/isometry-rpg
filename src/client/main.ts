@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { I18n, LOCALES, PSEUDO_LOCALE, SOURCE_LOCALE, pickLocale } from '../i18n';
 import {
-  type ClassId, type GameEvent, type ItemId, type RaceId, type Region, type World, type ZoneKind, MAX_LEVEL, RECIPES, SKILLS,
+  type ClassId, type GameEvent, type ItemId, type RaceId, type Region, type World, type ZoneKind, MASTERY_DAMAGE, MAX_LEVEL, RECIPES, SKILLS,
   SHOP_STOCK, characterOf, createWorld, isAlive, minesLevelFor, nearestExit, nearestNpc, newHero, regionAt, travelerOf, xpToNextLevel,
 } from '../sim';
 import { CreationScreen } from './creation';
@@ -194,6 +194,9 @@ function showNotice(event: GameEvent): void {
       else if (event.reason === 'full') hud.log(i18n.t('log.noRoom'), true);
       else if (event.reason === 'notSold') hud.log(i18n.t('log.notSold'), true);
       else hud.log(i18n.t('log.worthless'), true);
+      return;
+    case 'masteryUp':
+      hud.log(i18n.t('log.mastery', { name: i18n.t(MONSTER_NAME[event.kind]), tier: event.tier, bonus: Math.round(event.tier * MASTERY_DAMAGE * 100) }));
       return;
     case 'skillLearned':
       hud.log(i18n.t('log.skillLearned', { skill: i18n.t(SKILL_NAME[event.id]) }));

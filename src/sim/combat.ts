@@ -1,12 +1,12 @@
 import {
-  CRIT_MULTIPLIER, ELDER, ELDER_CHANCE, MONSTER_LINK_RANGE,
-  MONSTER_AGGRO_RANGE, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
+  CRIT_MULTIPLIER, ELDER, ELDER_AGGRO, ELDER_CHANCE, MASTERY_DAMAGE, MASTERY_RARE, WANDER_RADIUS, WANDER_REST, WANDER_SPEED,
+  MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
   MONSTER_KINDS, MONSTER_LEASH, MONSTER_RESPAWN_CLEARANCE, MONSTER_RESPAWN_TIME, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
-import { critChance, dropLoot, gearStats, playerDamage, playerDefense } from './inventory';
+import { critChance, dropLoot, gearStats, masteryTier, playerDamage, playerDefense } from './inventory';
 import { DROP_TABLES, ITEMS } from './items';
 import { rollMods } from './mods';
 import { guardDuty } from './npcs';
@@ -52,6 +52,17 @@ function dropMonsterLoot(world: World, monster: Monster): void {
       chance -= entry.chance;
     }
   }
+  // The trophy is rolled apart from everything else. Knowing the beast well makes it a little likelier.
+  const { rare } = table;
+  const tier = masteryTier(world.player.kills[monster.kind]);
+  const found = monster.elder ? roll(world, [1, 100]) <= rare.elderChance : roll(world, [1, 1000]) <= rare.chance + tier * MASTERY_RARE;
+  if (found) {
+    const def = ITEMS[rare.itemId];
+    const rng = createRng(world.rngState);
+    const mods = def.kind === 'equipment' ? rollMods(rng, def, true) : undefined;
+    world.rngState = rng.state;
+    dropLoot(world, rare.itemId, 1, { x: monster.pos.x, y: monster.pos.y + 0.45 }, false, 0, mods);
+  }
 }
 
 /** Removes dead monsters. In the open world they come back after a while; a dungeon stays cleared. */
@@ -73,7 +84,8 @@ export function buryTheDead(world: World): void {
 export function hitMonster(world: World, monster: Monster, multiplier: number, push: Point): number {
   const { player, map } = world;
   const crit = roll(world, [1, 100]) <= critChance(player);
-  const power = (1 + gearStats(player).power / 100) * (crit ? CRIT_MULTIPLIER : 1);
+  const mastery = 1 + masteryTier(player.kills[monster.kind]) * MASTERY_DAMAGE;
+  const power = (1 + gearStats(player).power / 100) * (crit ? CRIT_MULTIPLIER : 1) * mastery;
   const damage = Math.max(1, Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * multiplier * power));
   monster.hp = Math.max(0, monster.hp - damage);
   monster.aggro = true;
@@ -81,8 +93,8 @@ export function hitMonster(world: World, monster: Monster, multiplier: number, p
   // Only a critical blow staggers a monster out of its own attack, and an elder not even then.
   if (crit && !monster.elder) monster.windup = 0;
   const length = Math.hypot(push.x, push.y);
-  // A monster that has begun its blow stands its ground.
-  if (length > 0 && monster.windup === 0 && !monster.elder) {
+  // An elder is too heavy to be pushed about.
+  if (length > 0 && !monster.elder) {
     monster.pos = pushOutOfWalls(
       map,
       { x: monster.pos.x + (push.x / length) * MONSTER_KNOCKBACK, y: monster.pos.y + (push.y / length) * MONSTER_KNOCKBACK },
@@ -92,6 +104,12 @@ export function hitMonster(world: World, monster: Monster, multiplier: number, p
   world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0, crit });
   if (monster.hp > 0) return 0;
   dropMonsterLoot(world, monster);
+  // Every kill by the hero's own hand counts towards knowing this kind of beast.
+  const before = masteryTier(player.kills[monster.kind]);
+  player.kills[monster.kind] += 1;
+  const tier = masteryTier(player.kills[monster.kind]);
+  if (tier > before) world.events.push({ type: 'masteryUp', kind: monster.kind, tier });
+  player.revision += 1;
   return monsterXp(monster.level, monster.kind, monster.elder);
 }
 
@@ -120,12 +138,15 @@ export function hitMonstersAround(world: World, centre: Point, radius: number, m
   return xp;
 }
 
-/** Lands the hero's melee blow: damages every monster inside the swing. */
+/**
+ * Lands the hero's melee blow. An ordinary blow hits one monster, the nearest
+ * inside the swing; a sweeping one hits every monster inside it.
+ */
 export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
   const { player, map } = world;
   const { dir } = attack;
   const halfArc = attack.arc / 2;
-  let xp = 0;
+  const inSwing: Array<{ monster: Monster; distance: number; push: Point }> = [];
   for (const monster of world.monsters) {
     const dx = monster.pos.x - player.pos.x;
     const dy = monster.pos.y - player.pos.y;
@@ -138,8 +159,11 @@ export function resolvePlayerAttack(world: World, attack: PendingAttack): void {
     }
     // No hitting through walls.
     if (!clearLine(map, player.pos, monster.pos, 0.05)) continue;
-    xp += hitMonster(world, monster, attack.multiplier, { x: dx, y: dy });
+    inSwing.push({ monster, distance, push: { x: dx, y: dy } });
   }
+  inSwing.sort((a, b) => a.distance - b.distance || a.monster.id - b.monster.id);
+  let xp = 0;
+  for (const { monster, push } of attack.cleave ? inSwing : inSwing.slice(0, 1)) xp += hitMonster(world, monster, attack.multiplier, push);
   buryTheDead(world);
   grantXp(world, xp);
 }
@@ -167,7 +191,7 @@ const MONSTER_PATH_BUDGET = 500;
  * Moves a monster one tick towards `target`: straight if nothing is in the
  * way, otherwise around walls. Stops `stopAt` short of the target.
  */
-function walkTowards(world: World, monster: Monster, target: Point, stopAt: number): void {
+function walkTowards(world: World, monster: Monster, target: Point, stopAt: number, pace = 1): void {
   const { map } = world;
   let aim = target;
   if (clearLine(map, monster.pos, target, MONSTER_RADIUS)) {
@@ -188,7 +212,7 @@ function walkTowards(world: World, monster: Monster, target: Point, stopAt: numb
   const toAim = Math.hypot(dx, dy);
   const reach = aim === target ? Math.max(0, toAim - stopAt) : toAim;
   // A chilled monster walks at half speed.
-  const speed = MONSTER_KINDS[monster.kind].speed * (monster.slowTicks > 0 ? 0.5 : 1);
+  const speed = MONSTER_KINDS[monster.kind].speed * (monster.slowTicks > 0 ? 0.5 : 1) * pace;
   const move = Math.min((speed * TICK_MS) / 1000, reach);
   if (toAim === 0 || move <= 0) {
     if (aim !== target) monster.waypoint = null;
@@ -205,26 +229,49 @@ function walkTowards(world: World, monster: Monster, target: Point, stopAt: numb
 function giveUp(monster: Monster): void {
   monster.aggro = false;
   monster.called = false;
+  monster.stroll = null;
   monster.returning = true;
   monster.windup = 0;
   monster.waypoint = null;
 }
 
 /**
- * A monster that has just noticed the hero (or been hit) raises the alarm:
- * its pack and every monster close by join in. Those who answer do not call
- * further, so one careless step brings a pack or two, not the whole field.
+ * A monster that has just noticed the hero (or been hit) calls for help:
+ * others of its kind within earshot join in. Those who answer do not call
+ * further, so how many come depends on who stood near whom at that moment.
  */
 function raiseAlarm(world: World, caller: Monster): void {
   caller.called = true;
+  const earshot = MONSTER_KINDS[caller.kind].social;
+  if (earshot <= 0) return;
   for (const other of world.monsters) {
-    if (other === caller || other.aggro || other.returning || other.hp <= 0) continue;
-    const samePack = caller.pack >= 0 && other.pack === caller.pack;
-    const close = Math.hypot(other.pos.x - caller.pos.x, other.pos.y - caller.pos.y) <= MONSTER_LINK_RANGE;
-    if (!close && !(samePack && Math.hypot(other.pos.x - caller.pos.x, other.pos.y - caller.pos.y) <= MONSTER_LINK_RANGE * 3)) continue;
+    if (other === caller || other.kind !== caller.kind || other.aggro || other.returning || other.hp <= 0) continue;
+    if (Math.hypot(other.pos.x - caller.pos.x, other.pos.y - caller.pos.y) > earshot) continue;
     other.aggro = true;
     other.called = true;
+    other.stroll = null;
   }
+}
+
+/** An idle monster strolls about its home, so the gaps between monsters never stay the same. */
+function wander(world: World, monster: Monster): void {
+  if (monster.stroll === null) {
+    if (monster.rest > 0) {
+      monster.rest -= 1;
+      return;
+    }
+    const angle = (roll(world, [0, 359]) * Math.PI) / 180;
+    const reach = (roll(world, [10, 100]) / 100) * WANDER_RADIUS;
+    const target = { x: monster.home.x + Math.cos(angle) * reach, y: monster.home.y + Math.sin(angle) * reach };
+    monster.rest = roll(world, WANDER_REST);
+    // Only a straight, open walk: a stroll is not worth finding a way around a wood for.
+    if (clearLine(world.map, monster.pos, target, MONSTER_RADIUS)) monster.stroll = target;
+    return;
+  }
+  const before = monster.pos;
+  walkTowards(world, monster, monster.stroll, 0, WANDER_SPEED);
+  const left = Math.hypot(monster.stroll.x - monster.pos.x, monster.stroll.y - monster.pos.y);
+  if (left < 0.1 || Math.hypot(monster.pos.x - before.x, monster.pos.y - before.y) < 1e-4) monster.stroll = null;
 }
 
 /** Keeps monsters from standing inside each other or inside the hero. */
@@ -282,6 +329,8 @@ function respawnMonsters(world: World): void {
       pos: { ...monster.home },
       hp: maxHp,
       called: false,
+      stroll: null,
+      rest: WANDER_REST[0],
       aggro: false,
       returning: false,
       windup: 0,
@@ -319,12 +368,19 @@ export function updateMonsters(world: World): void {
     }
     if (!heroIsPrey) {
       if (monster.aggro) giveUp(monster);
+      else wander(world, monster);
       continue;
     }
 
     const distance = Math.hypot(player.pos.x - monster.pos.x, player.pos.y - monster.pos.y);
-    if (!monster.aggro && distance <= MONSTER_AGGRO_RANGE) monster.aggro = true;
-    if (!monster.aggro) continue;
+    // Some kinds attack on sight, others only when provoked; an elder of any kind attacks.
+    const sight = monster.elder ? Math.max(ELDER_AGGRO, MONSTER_KINDS[monster.kind].aggro) : MONSTER_KINDS[monster.kind].aggro;
+    if (!monster.aggro && distance <= sight) monster.aggro = true;
+    if (!monster.aggro) {
+      wander(world, monster);
+      continue;
+    }
+    monster.stroll = null;
     if (!monster.called) raiseAlarm(world, monster);
     // The leash only matters in the open world; in a dungeon there is nowhere to run.
     if (world.zone === 'overworld' && Math.hypot(monster.home.x - monster.pos.x, monster.home.y - monster.pos.y) > MONSTER_LEASH) {
@@ -333,11 +389,13 @@ export function updateMonsters(world: World): void {
     }
 
     if (monster.windup > 0) {
-      // The monster stands still while it prepares the blow.
+      // It keeps after the hero while it prepares the blow: stepping aside is not enough to avoid it.
       monster.windup -= 1;
+      walkTowards(world, monster, player.pos, MONSTER_ATTACK_START * 0.85);
       if (monster.windup === 0) {
         monster.cooldown = MONSTER_ATTACK_COOLDOWN;
-        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(monster.level, monster.kind, monster.elder)));
+        const reach = Math.hypot(player.pos.x - monster.pos.x, player.pos.y - monster.pos.y);
+        if (reach <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(monster.level, monster.kind, monster.elder)));
       }
     } else if (distance <= MONSTER_ATTACK_START && monster.cooldown === 0) {
       monster.windup = MONSTER_ATTACK_WINDUP;
@@ -359,6 +417,7 @@ export function resetMonsters(world: World): void {
     monster.hp = monster.maxHp;
     monster.aggro = false;
     monster.called = false;
+    monster.stroll = null;
     monster.returning = false;
     monster.windup = 0;
     monster.cooldown = 0;

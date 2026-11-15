@@ -1,7 +1,7 @@
 import type { I18n } from '../i18n';
 import { type Affix, type ItemDef, type ItemId, type ItemMods, ITEMS, JEWELLERY_SLOTS, RECIPES, armorDefense, weaponDamage } from '../sim';
 import { itemIcon } from './itemIcon';
-import { GRADE_NAME, ITEM_NAME, QUALITY_NAME, type RecipeItemId, qualityCss } from './itemText';
+import { GRADE_NAME, ITEM_NAME, QUALITY_NAME, type RecipeItemId, UNIQUE_CSS, qualityCss } from './itemText';
 
 export function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -70,6 +70,16 @@ export function affixText(i18n: I18n, { stat, value }: Affix): string {
   }
 }
 
+/** The properties a trophy always has; empty for ordinary equipment. */
+export function uniqueAffixes(def: Extract<ItemDef, { kind: 'equipment' }>): readonly Affix[] {
+  return def.slot !== 'weapon' && def.unique ? def.unique : [];
+}
+
+/** The colour of a piece of equipment's name: by quality, or the trophy colour. */
+export function gearColor(def: Extract<ItemDef, { kind: 'equipment' }>, mods?: ItemMods | null): string {
+  return uniqueAffixes(def).length > 0 ? UNIQUE_CSS : qualityCss(mods?.quality ?? 'common');
+}
+
 /** "Helmet · D · Rare": what kind of thing a piece of equipment is. */
 export function gearKind(i18n: I18n, kind: string, def: Extract<ItemDef, { kind: 'equipment' }>, mods?: ItemMods | null): string {
   return `${kind} · ${i18n.t(GRADE_NAME[def.grade])} · ${i18n.t(QUALITY_NAME[mods?.quality ?? 'common'])}`;
@@ -88,7 +98,7 @@ export function gearScore(def: Extract<ItemDef, { kind: 'equipment' }>, enchant:
   } else {
     score = armorDefense(def, enchant, mods) * 3;
   }
-  for (const affix of mods?.affixes ?? []) score += affix.value * WEIGHT[affix.stat];
+  for (const affix of [...uniqueAffixes(def), ...(mods?.affixes ?? [])]) score += affix.value * WEIGHT[affix.stat];
   return score;
 }
 
@@ -102,9 +112,10 @@ export function describeItem(i18n: I18n, itemId: ItemId, count: number, enchant 
   block.append(title);
   const effect = itemEffect(i18n, itemId, enchant, mods);
   if (def.kind === 'equipment') {
-    title.style.color = qualityCss(mods?.quality ?? 'common');
+    title.style.color = gearColor(def, mods);
     block.append(make('span', 'item-detail', `${i18n.t(GRADE_NAME[def.grade])} · ${i18n.t(QUALITY_NAME[mods?.quality ?? 'common'])} · ${effect}`));
-    if (mods && mods.affixes.length > 0) block.append(make('span', 'item-affix', mods.affixes.map((affix) => affixText(i18n, affix)).join(' · ')));
+    const affixes = [...uniqueAffixes(def), ...(mods?.affixes ?? [])];
+    if (affixes.length > 0) block.append(make('span', 'item-affix', affixes.map((affix) => affixText(i18n, affix)).join(' · ')));
   } else if (def.kind === 'scroll') {
     block.append(make('span', 'item-detail', `${i18n.t(GRADE_NAME[def.grade])} · ${effect}`));
   } else {

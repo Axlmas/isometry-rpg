@@ -1,4 +1,4 @@
-import { CRIT_BASE, CRIT_MAX, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_COOLDOWN_MIN, INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
+import { type MonsterKind, CRIT_BASE, CRIT_MAX, MASTERY_TIERS, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_COOLDOWN_MIN, INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
 import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { ENCHANT_ARMOR_BONUS, ENCHANT_WEAPON_BONUS } from './balance';
@@ -46,6 +46,8 @@ export interface Character {
   equipmentEnchant?: Partial<Record<EquipSlot, number>>;
   /** Quality and properties of each worn item; plain when left out. */
   equipmentMods?: Partial<Record<EquipSlot, ItemMods | null>>;
+  /** How many monsters of each kind the hero has killed; none when left out. */
+  kills?: Partial<Record<MonsterKind, number>>;
   /** Skills learned from the trainer; none when left out. */
   skills?: SkillId[];
   /** Recipes learned from recipe items; none when left out. */
@@ -70,13 +72,14 @@ export function newCharacter(startingWeapon: ItemId): Character {
 }
 
 export function characterOf(world: World): Character {
-  const { race, cls, level, xp, coins, inventory, equipment, equipmentEnchant, equipmentMods, skills, recipes } = world.player;
+  const { race, cls, level, xp, coins, inventory, equipment, equipmentEnchant, equipmentMods, skills, recipes, kills } = world.player;
   return {
     race, cls, level, xp, coins,
     inventory: inventory.map((stack) => ({ ...stack })),
     equipment: { ...equipment },
     equipmentEnchant: { ...equipmentEnchant },
     equipmentMods: { ...equipmentMods },
+    kills: { ...kills },
     skills: [...skills],
     recipes: [...recipes],
   };
@@ -113,10 +116,20 @@ export function armorDefense(def: Extract<ItemDef, { kind: 'equipment' }>, encha
 export function gearStats(player: Player): Record<StatId, number> {
   const total: Record<StatId, number> = { hp: 0, mp: 0, power: 0, defense: 0, crit: 0, haste: 0, speed: 0 };
   for (const slot of EQUIP_SLOTS) {
-    const mods = player.equipment[slot] ? player.equipmentMods[slot] : null;
+    const itemId = player.equipment[slot];
+    if (!itemId) continue;
+    const def = ITEMS[itemId];
+    // A trophy's own properties count the same as rolled ones.
+    if (def.kind === 'equipment' && def.slot !== 'weapon' && def.unique) for (const affix of def.unique) total[affix.stat] += affix.value;
+    const mods = player.equipmentMods[slot];
     if (mods) for (const affix of mods.affixes) total[affix.stat] += affix.value;
   }
   return total;
+}
+
+/** How well the hero knows a kind of monster: the number of mastery tiers reached by killing it. */
+export function masteryTier(kills: number): number {
+  return MASTERY_TIERS.filter((needed) => kills >= needed).length;
 }
 
 /** Chance of a critical blow, in percent. */
