@@ -285,6 +285,7 @@ const scene = new DungeonScene(world, {
   onInventoryFull: () => hud.log(i18n.t('log.full'), true),
   onToggleInventory: () => inventory.toggle(),
   onInteract: interact,
+  onReady: () => document.getElementById('loading')?.remove(),
   onTarget: (monster) =>
     hud.setTarget(monster ? { name: i18n.t(MONSTER_NAME[monster.kind]), level: monster.level, hp: monster.hp, maxHp: monster.maxHp } : null),
   onNotice: showNotice,

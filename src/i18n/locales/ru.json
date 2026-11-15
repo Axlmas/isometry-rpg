@@ -1,5 +1,6 @@
 {
   "game.title": "Isometry RPG",
+  "loading.text": "Загрузка мира…",
   "hud.health": "Здоровье: {current, number} из {max, number}",
   "hud.heroLine": "{race}, {cls}",
   "race.human": "Человек",

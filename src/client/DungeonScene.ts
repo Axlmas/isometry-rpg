@@ -7,6 +7,8 @@ import {
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
 import { GRADE_COLOR } from './itemText';
 import { QUICK_KEYS } from './hotbar';
+import { NPC_LOOK } from './npcText';
+import { type AnimationName, HERO_SHEET, MONSTER_SHEET, NPC_SHEET, createAnimations, createCharacter, directionOf, hasSheet, playCharacter, preloadSheets } from './sheets';
 import { SKILL_SLOTS } from './skillText';
 import { drawHeroFigure, drawMonsterFigure, drawNpcFigure, drawShadow, drawWeapon } from './sprites';
 import { EXIT_COLOR, REGION_LOOK, ROAD_COLOR } from './zoneText';
@@ -65,6 +67,8 @@ export interface SceneEvents {
   onInteract(): void;
   /** The monster the hero is fighting or pointing at changed, or its health did; null when there is none. */
   onTarget(monster: Monster | null): void;
+  /** The pictures are loaded and the world is on screen. */
+  onReady(): void;
   /** The hero walked through an exit. */
   onTravel(to: ZoneKind): void;
   /** The hero asked to rise after dying. */
@@ -80,6 +84,10 @@ interface MonsterSprite {
   /** Holds the body so it can be mirrored and bobbed without moving the health bar. */
   figure: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Graphics;
+  /** The animated picture, for monsters that have a sprite sheet; the rest are drawn into `body`. */
+  sprite: Phaser.GameObjects.Sprite | null;
+  /** The direction it last faced, kept while it stands still. */
+  direction: number;
   bar: Phaser.GameObjects.Graphics;
   previous: Point;
   lastHp: number;
@@ -115,6 +123,11 @@ export class DungeonScene extends Phaser.Scene {
   private heroFigure!: Phaser.GameObjects.Container;
   private weapon!: Phaser.GameObjects.Graphics;
   private heroBody!: Phaser.GameObjects.Graphics;
+  /** The hero's animated picture, when the sheet for the class is available. */
+  private heroSprite: Phaser.GameObjects.Sprite | null = null;
+  private heroSheet = '';
+  /** A one-off animation in progress (a blow, a flinch, dying) and when it ends. */
+  private heroAction: { animation: AnimationName; until: number } | null = null;
   /** What the hero figure was last drawn from, so it is redrawn only when the look changes. */
   private shownLook = '';
   /** Extra turn of the blade during a swing, in radians; eased back to zero. */
@@ -131,7 +144,12 @@ export class DungeonScene extends Phaser.Scene {
     this.events_ = events;
   }
 
+  preload(): void {
+    preloadSheets(this);
+  }
+
   create(): void {
+    createAnimations(this);
     this.marker = this.add.graphics().setDepth(-500).setVisible(false);
     this.marker.lineStyle(2, 0xe8c36a, 0.9).strokeEllipse(0, 0, 26, 13);
     this.marker.fillStyle(0xe8c36a, 0.35).fillEllipse(0, 0, 26, 13);
@@ -199,6 +217,7 @@ export class DungeonScene extends Phaser.Scene {
     this.scale.on('resize', this.fitCamera, this);
     this.fitCamera();
     this.setWorld(this.world);
+    this.events_.onReady();
   }
 
   /** Replaces the world being shown, for example when a new dungeon starts. */
@@ -228,7 +247,8 @@ export class DungeonScene extends Phaser.Scene {
     this.projectileSprites.clear();
     this.shownLook = '';
     this.placeHero(world.player.pos);
-    this.hero.setAlpha(isAlive(world) ? 1 : 0.35);
+    this.heroAction = isAlive(world) ? null : { animation: 'death', until: Infinity };
+    this.hero.setAlpha(isAlive(world) || hasSheet(this, HERO_SHEET[world.player.cls]) ? 1 : 0.35);
     this.cameras.main.centerOn(this.hero.x, this.hero.y);
     this.reportStats();
   }
@@ -459,7 +479,10 @@ export class DungeonScene extends Phaser.Scene {
         return false;
       case 'skillUsed': {
         const { effect } = SKILLS[event.id];
-        if (effect.kind === 'nova') this.showSwing(event.dir, Math.PI * 2, effect.radius, 0x9fe0ff);
+        if (effect.kind === 'nova') {
+          this.showSwing(event.dir, Math.PI * 2, effect.radius, 0x9fe0ff);
+          this.heroActs('attack', 400);
+        }
         if (effect.kind === 'haste') this.showRing(0x9ff0d0);
         if (effect.kind === 'shot') this.swingBlade();
         if (effect.kind === 'strike') {
@@ -518,6 +541,7 @@ export class DungeonScene extends Phaser.Scene {
         this.floatNumber(at.x, at.y - 40, event.damage, '#ffe9a8');
         const sprite = this.monsterSprites.get(event.id);
         if (sprite) this.flash(sprite.container);
+        if (event.died && sprite?.sprite) this.showFallen(sprite, at);
         this.showSparks(at.x, at.y - 16, 0xfff0c0);
         this.targetId = event.id;
         this.targetUntil = performance.now() + TARGET_MEMORY_MS;
@@ -529,12 +553,15 @@ export class DungeonScene extends Phaser.Scene {
       case 'playerHit':
         this.floatNumber(this.hero.x, this.hero.y - 60, event.damage, '#ff7a6b');
         this.flash(this.hero);
+        this.heroActs('hit', 250);
         this.showSparks(this.hero.x, this.hero.y - 24, 0xff7a6b);
         this.cameras.main.shake(90, 0.004);
         return false;
       case 'playerDied':
         this.marker.setVisible(false);
-        this.hero.setAlpha(0.35);
+        this.heroAction = { animation: 'death', until: Infinity };
+        // The fallen sprite lies on the ground; a figure drawn from shapes is faded instead.
+        if (!this.heroSprite) this.hero.setAlpha(0.35);
         this.events_.onDeath(this.world, event.xpLost);
         return true;
       case 'playerRespawned':
@@ -636,6 +663,7 @@ export class DungeonScene extends Phaser.Scene {
 
   /** Starts the quick turn of the blade that accompanies a blow. */
   private swingBlade(): void {
+    this.heroActs('attack', 400);
     this.swing = 1.6;
     this.tweens.add({
       targets: this,
@@ -646,10 +674,37 @@ export class DungeonScene extends Phaser.Scene {
     });
   }
 
-  /** The blade points where the hero faces; a walking hero bobs a little. */
+  /** Starts a one-off animation of the hero's sprite; a blow or dying is not cut short by a flinch. */
+  private heroActs(animation: AnimationName, ms: number): void {
+    const busy = this.heroAction !== null && performance.now() < this.heroAction.until;
+    if (animation === 'hit' && busy) return;
+    this.heroAction = { animation, until: performance.now() + ms };
+  }
+
+  /** Shows the hero: an animated sprite of the class when there is one, otherwise a figure drawn from shapes. */
   private animateHero(): void {
     const { player } = this.world;
     const { facing, chargesOn, equipment, race, cls } = player;
+    const sheet = HERO_SHEET[cls];
+    if (hasSheet(this, sheet)) {
+      if (sheet !== this.heroSheet) {
+        this.heroSprite?.destroy();
+        this.heroSprite = createCharacter(this, sheet);
+        this.heroFigure.add(this.heroSprite);
+        this.heroSheet = sheet;
+        this.heroBody.clear();
+        this.weapon.clear();
+      }
+      const sprite = this.heroSprite as Phaser.GameObjects.Sprite;
+      if (this.heroAction && this.heroAction.animation !== 'death' && performance.now() >= this.heroAction.until) this.heroAction = null;
+      const animation: AnimationName = !isAlive(this.world) ? 'death' : this.heroAction ? this.heroAction.animation : isMoving(this.world) ? 'run' : 'idle';
+      playCharacter(this, sprite, sheet, animation, directionOf(facing.x, facing.y));
+      // A charged weapon gives the hero a cold glow.
+      if (chargesOn) sprite.setTint(0xd8f6ff);
+      else sprite.clearTint();
+      return;
+    }
+
     const look = `${race}/${cls}/${equipment.weapon}/${equipment.helmet}/${equipment.armor}/${equipment.boots}/${chargesOn}`;
     if (look !== this.shownLook) {
       this.shownLook = look;
@@ -709,6 +764,15 @@ export class DungeonScene extends Phaser.Scene {
     return event?.target === this.game.canvas;
   }
 
+  /** A monster with a sprite sheet falls where it stood, lies for a moment and fades away. */
+  private showFallen(from: MonsterSprite, at: Point): void {
+    const sheet = from.sprite?.texture.key;
+    if (!sheet) return;
+    const body = createCharacter(this, sheet).setPosition(at.x, at.y).setDepth(from.container.depth);
+    playCharacter(this, body, sheet, 'death', from.direction);
+    this.tweens.add({ targets: body, alpha: 0, delay: 900, duration: 500, onComplete: () => body.destroy() });
+  }
+
   /** A few bright specks flying out from a blow. */
   private showSparks(x: number, y: number, color: number): void {
     for (let i = 0; i < 6; i++) {
@@ -729,9 +793,11 @@ export class DungeonScene extends Phaser.Scene {
   private createMonsterSprite(monster: Monster): MonsterSprite {
     const body = this.add.graphics();
     const bar = this.add.graphics();
-    const figure = this.add.container(0, 0, [body]);
+    const sheet = MONSTER_SHEET[monster.kind];
+    const sprite = hasSheet(this, sheet) ? createCharacter(this, sheet) : null;
+    const figure = this.add.container(0, 0, sprite ? [body, sprite] : [body]);
     const container = this.add.container(0, 0, [figure, bar]);
-    return { container, figure, body, bar, previous: { ...monster.pos }, lastHp: -1 };
+    return { container, figure, body, sprite, direction: 1, bar, previous: { ...monster.pos }, lastHp: -1 };
   }
 
   private drawMonsterBody(sprite: MonsterSprite, kind: Monster['kind'], windingUp: boolean): void {
@@ -739,6 +805,13 @@ export class DungeonScene extends Phaser.Scene {
     g.clear();
     // The warning before a blow: the monster turns bright and a ring appears under it.
     if (windingUp) g.lineStyle(2.5, 0xffb347, 1).strokeEllipse(0, 0, 44, 22);
+    if (sprite.sprite) {
+      // An animated monster keeps its picture; only a shadow and the warning ring are drawn under it.
+      drawShadow(g, 30);
+      if (windingUp) sprite.sprite.setTint(0xffb080);
+      else sprite.sprite.clearTint();
+      return;
+    }
     drawMonsterFigure(g, kind, windingUp);
   }
 
@@ -755,10 +828,20 @@ export class DungeonScene extends Phaser.Scene {
       const y = sprite.previous.y + (monster.pos.y - sprite.previous.y) * alpha;
       const at = tileToScreen(x, y);
       // Monsters are drawn facing right; mirror them when they move or look the other way on the screen.
-      const heading = monster.aggro ? tileToScreen(this.world.player.pos.x - x, this.world.player.pos.y - y).x : at.x - sprite.container.x;
-      if (Math.abs(heading) > 0.3) sprite.figure.setScale(heading < 0 ? -1 : 1, 1);
       const stepping = Math.hypot(monster.pos.x - sprite.previous.x, monster.pos.y - sprite.previous.y) > 0.001;
-      sprite.figure.y = stepping ? -Math.abs(Math.sin(performance.now() / 90 + monster.id)) * 2 : 0;
+      const sheet = MONSTER_SHEET[monster.kind];
+      if (sprite.sprite && sheet) {
+        // It looks at the hero while hunting, otherwise where it walks.
+        const look = monster.aggro
+          ? { x: this.world.player.pos.x - x, y: this.world.player.pos.y - y }
+          : { x: monster.pos.x - sprite.previous.x, y: monster.pos.y - sprite.previous.y };
+        if (Math.hypot(look.x, look.y) > 0.001) sprite.direction = directionOf(look.x, look.y);
+        playCharacter(this, sprite.sprite, sheet, monster.windup > 0 ? 'attack' : stepping ? 'run' : 'idle', sprite.direction);
+      } else {
+        const heading = monster.aggro ? tileToScreen(this.world.player.pos.x - x, this.world.player.pos.y - y).x : at.x - sprite.container.x;
+        if (Math.abs(heading) > 0.3) sprite.figure.setScale(heading < 0 ? -1 : 1, 1);
+        sprite.figure.y = stepping ? -Math.abs(Math.sin(performance.now() / 90 + monster.id)) * 2 : 0;
+      }
       sprite.container.setPosition(at.x, at.y).setDepth(x + y);
 
       const windingUp = monster.windup > 0;
@@ -791,11 +874,30 @@ export class DungeonScene extends Phaser.Scene {
     return g;
   }
 
-  private drawNpc(npc: Npc): Phaser.GameObjects.Graphics {
+  private drawNpc(npc: Npc): Phaser.GameObjects.GameObject {
     const at = tileToScreen(npc.pos.x, npc.pos.y);
-    const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(npc.pos.x + npc.pos.y);
-    drawNpcFigure(g, npc.kind);
-    return g;
+    const depth = npc.pos.x + npc.pos.y;
+    const sheet = NPC_SHEET[npc.kind];
+    if (!hasSheet(this, sheet)) {
+      const g = this.add.graphics({ x: at.x, y: at.y }).setDepth(depth);
+      drawNpcFigure(g, npc.kind);
+      return g;
+    }
+    const shadow = this.add.graphics();
+    drawShadow(shadow, 30);
+    const sprite = createCharacter(this, sheet);
+    playCharacter(this, sprite, sheet, 'idle', 1);
+    // Each villager breathes out of step with the others.
+    sprite.anims.setProgress((npc.id * 0.37) % 1);
+    const parts: Phaser.GameObjects.GameObject[] = [shadow, sprite];
+    if (npc.kind !== 'guard') {
+      // A sign over the head marks someone worth talking to.
+      const sign = this.add.graphics();
+      sign.fillStyle(0x14110d).fillCircle(0, -64, 5.5);
+      sign.fillStyle(NPC_LOOK[npc.kind].sign).fillCircle(0, -64, 4.2);
+      parts.push(sign);
+    }
+    return this.add.container(at.x, at.y, parts).setDepth(depth);
   }
 
   /** A quick line from the guard to the monster he struck. */

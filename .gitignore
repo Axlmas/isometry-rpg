@@ -24,3 +24,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.swp
+
+# Sprite tool: its own dependencies, and stray PNG renders (the game uses WebP)
+tools/sprites/node_modules/
+public/sprites/*.png

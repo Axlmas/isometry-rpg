@@ -1,0 +1,12 @@
+{
+  "name": "isometry-rpg-sprite-tool",
+  "private": true,
+  "type": "module",
+  "description": "Renders 3D character models into 8-direction sprite sheets for the game. Not part of the game build.",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  }
+}

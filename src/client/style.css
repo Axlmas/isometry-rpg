@@ -188,3 +188,7 @@ button.small { min-block-size: 22px; padding: 2px 8px; font-size: 12px; }
 .dev-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
 #dev-open { color: var(--warning); border-color: #6a4a2a; }
 #dev-reset { color: var(--warning); align-self: flex-start; }
+
+/* Shown until the pictures are loaded */
+#loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0c10; color: var(--accent);
+  font: 600 20px/1.2 Georgia, "Times New Roman", serif; letter-spacing: 0.08em; }
