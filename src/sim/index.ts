@@ -6,6 +6,7 @@ export * from './dev';
 export * from './grid';
 export * from './inventory';
 export * from './items';
+export * from './mods';
 export * from './pathfinding';
 export * from './projectiles';
 export * from './progression';

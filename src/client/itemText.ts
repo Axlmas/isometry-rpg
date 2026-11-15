@@ -1,5 +1,5 @@
 import type { MessageKey } from '../i18n';
-import type { EquipSlot, Grade, ItemId, WeaponType } from '../sim';
+import type { EquipSlot, Grade, ItemId, Quality, WeaponType } from '../sim';
 
 export type RecipeItemId = 'recipeSoldierBlade' | 'recipeIronHelm' | 'recipeChainShirt' | 'recipeIronGreaves' | 'recipeLongbow' | 'recipeRunedStaff';
 
@@ -29,6 +29,12 @@ export const ITEM_NAME: Record<Exclude<ItemId, 'coins' | RecipeItemId>, MessageK
   chainShirt: 'item.chainShirt',
   leatherBoots: 'item.leatherBoots',
   ironGreaves: 'item.ironGreaves',
+  leatherGloves: 'item.leatherGloves',
+  ironGauntlets: 'item.ironGauntlets',
+  copperRing: 'item.copperRing',
+  silverRing: 'item.silverRing',
+  boneAmulet: 'item.boneAmulet',
+  silverAmulet: 'item.silverAmulet',
   healthPotion: 'item.healthPotion',
   manaPotion: 'item.manaPotion',
   chargePlain: 'item.chargePlain',
@@ -47,7 +53,10 @@ export const SLOT_NAME: Record<EquipSlot, MessageKey> = {
   weapon: 'slot.weapon',
   helmet: 'slot.helmet',
   armor: 'slot.armor',
+  gloves: 'slot.gloves',
   boots: 'slot.boots',
+  ring: 'slot.ring',
+  amulet: 'slot.amulet',
 };
 
 /** Kinds of weapon; each class fights with one of them. */
@@ -62,8 +71,21 @@ export const GRADE_NAME: Record<Grade, MessageKey> = {
   d: 'grade.d',
 };
 
-/** Colours used for an item's grade, on the floor and in the bag. */
-export const GRADE_COLOR: Record<Grade, number> = {
-  none: 0xcfd3dc,
-  d: 0x5fa8ff,
+export const QUALITY_NAME: Record<Quality, MessageKey> = {
+  common: 'quality.common',
+  fine: 'quality.fine',
+  rare: 'quality.rare',
+  epic: 'quality.epic',
 };
+
+/** Colours of an item's quality: its name, its bag cell and its glow on the ground. */
+export const QUALITY_COLOR: Record<Quality, number> = {
+  common: 0xcfd3dc,
+  fine: 0x6fd08c,
+  rare: 0x5fa8ff,
+  epic: 0xc58bff,
+};
+
+export function qualityCss(quality: Quality): string {
+  return `#${QUALITY_COLOR[quality].toString(16).padStart(6, '0')}`;
+}

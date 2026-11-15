@@ -50,5 +50,9 @@
   "hunter.chance": "{chance} is an already formatted number, such as 5.5; only the percent sign and its spacing change by language.",
   "hunter.amount": "An item and how many of it drop at once, for example 'Leather × 1–2'.",
   "dev.open": "Button that opens the testing tools. Shown only while the game is in development; left untranslated on purpose.",
-  "slot.weaponSword": "Kinds of weapon, shown in an item's description. Each class uses one kind."
+  "slot.weaponSword": "Kinds of weapon, shown in an item's description. Each class uses one kind.",
+  "monster.elder": "{name} is a monster's name (wolf, boar, ghoul). An elder is a rare, much stronger one. All monster names are masculine in Russian; keep the adjective agreeing with them.",
+  "hud.xpPercent": "{percent} is an already formatted number with two decimals, for example 12.34.",
+  "grade.dShort": "A one-letter badge in the corner of an item's cell.",
+  "quality.common": "Item quality tiers, from worst to best: common, fine, rare, epic. Shown after the item's kind, like 'Helmet · D-grade · Rare'."
 }

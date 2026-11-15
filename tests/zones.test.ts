@@ -96,7 +96,7 @@ describe('regions', () => {
       const [min, max] = region.levels!;
       expect(monster.level).toBeGreaterThanOrEqual(min);
       expect(monster.level).toBeLessThanOrEqual(max);
-      expect(monster.maxHp).toBe(monsterMaxHp(monster.level, monster.kind));
+      expect(monster.maxHp).toBe(monsterMaxHp(monster.level, monster.kind, monster.elder));
     }
     expect([...seen].sort()).toEqual(['hollow', 'moor']);
     expect(REGIONS.hollow.levels![0]).toBeGreaterThan(REGIONS.moor.levels![1]);

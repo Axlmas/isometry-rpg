@@ -101,6 +101,7 @@ button.small { min-block-size: 22px; padding: 2px 8px; font-size: 12px; }
 .talk { position: fixed; inset-block: 112px 152px; inset-inline-start: 10px; inline-size: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 #help { inset-block: auto 152px; }
 #hero-stats { color: var(--ink); }
+#hero-bonus { color: var(--muted); font-size: 11px; }
 .coins, #shop-coins { color: #e9c85a; font-weight: 600; }
 #coins { margin-block-start: 6px; text-align: end; }
 
@@ -113,6 +114,7 @@ button.small { min-block-size: 22px; padding: 2px 8px; font-size: 12px; }
 .item-name { font-weight: 600; overflow-wrap: anywhere; }
 .item-detail, .item-empty { color: var(--muted); font-size: 11px; }
 .item-detail.warning { color: var(--warning); }
+.item-affix { color: #8fd3a6; font-size: 11px; }
 .item-empty { flex: 1; }
 .item-better { color: var(--good); font-size: 11px; }
 .item-price { color: #e9c85a; font-size: 12px; white-space: nowrap; }
@@ -120,12 +122,16 @@ button.small { min-block-size: 22px; padding: 2px 8px; font-size: 12px; }
 
 /* Bag grid */
 .cells { display: grid; grid-template-columns: repeat(6, 42px); gap: 3px; justify-content: center; }
-#equipment-grid { grid-template-columns: repeat(4, 42px); justify-content: start; }
+#equipment-grid { grid-template-columns: repeat(6, 42px); justify-content: start; }
 .cell { position: relative; inline-size: 42px; block-size: 42px; min-block-size: 0; padding: 3px; background: #0c0d12; border: 1px solid #3a3629;
   border-radius: 2px; display: grid; place-items: center; }
 .cell.empty { background: #090a0e; border-color: #24231d; cursor: default; }
 .cell:not(.empty):hover { border-color: var(--frame-light); }
-.cell[data-grade="d"] { border-color: #3f6fb0; box-shadow: inset 0 0 8px rgba(95, 168, 255, 0.3); }
+.cell[data-quality="fine"] { border-color: #3f8f5a; box-shadow: inset 0 0 8px rgba(111, 208, 140, 0.3); }
+.cell[data-quality="rare"] { border-color: #3f6fb0; box-shadow: inset 0 0 8px rgba(95, 168, 255, 0.35); }
+.cell[data-quality="epic"] { border-color: #8a55c8; box-shadow: inset 0 0 10px rgba(197, 139, 255, 0.45); }
+.cell-grade { position: absolute; inset-inline-end: 2px; inset-block-start: 0; font-size: 9px; font-weight: 700; color: #9fc4f2;
+  text-shadow: 0 0 2px #000, 0 0 2px #000; pointer-events: none; }
 .cell.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .cell .icon { inline-size: 100%; block-size: 100%; display: block; pointer-events: none; }
 .cell-count { position: absolute; inset-inline-end: 2px; inset-block-end: 0; font-size: 10px; font-weight: 700; text-shadow: 0 0 2px #000, 0 0 2px #000; pointer-events: none; }

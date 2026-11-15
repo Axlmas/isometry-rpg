@@ -4,6 +4,7 @@ import {
 import type { Point } from './grid';
 import { addItem, canFit } from './inventory';
 import { type ItemId, ITEMS, buyPrice, sellPrice } from './items';
+import { worthOf } from './mods';
 import { type SkillId, SKILLS, isSkillId } from './skills';
 import type { World } from './world';
 
@@ -21,7 +22,7 @@ export interface Npc {
 /** What each merchant sells, in the order shown. Every merchant buys anything that has a price. */
 export const SHOP_STOCK: Readonly<Partial<Record<NpcKind, readonly ItemId[]>>> = {
   alchemist: ['healthPotion', 'manaPotion', 'chargePlain', 'chargeD'],
-  outfitter: ['ironSword', 'huntingBow', 'oakStaff', 'leatherCap', 'leatherJerkin', 'leatherBoots'],
+  outfitter: ['ironSword', 'huntingBow', 'oakStaff', 'leatherCap', 'leatherJerkin', 'leatherGloves', 'leatherBoots'],
   blacksmith: [
     'scrollWeaponPlain', 'scrollArmorPlain', 'scrollWeaponD', 'scrollArmorD', 'crystalD',
     'recipeSoldierBlade', 'recipeLongbow', 'recipeRunedStaff', 'recipeIronHelm', 'recipeChainShirt', 'recipeIronGreaves',
@@ -91,7 +92,7 @@ export function sell(world: World, index: number, count: number): void {
   if (!stack || !validCount(count) || count > stack.count) return;
   if (!isNearMerchant(world)) return void world.events.push({ type: 'tradeDenied', reason: 'far' });
   const { itemId } = stack;
-  const price = sellPrice(itemId);
+  const price = sellPrice(itemId, worthOf(stack.mods));
   if (ITEMS[itemId].kind === 'currency' || price <= 0) return void world.events.push({ type: 'tradeDenied', reason: 'worthless' });
   stack.count -= count;
   if (stack.count === 0) player.inventory.splice(index, 1);

@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
 import {
-  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Npc, type Point, type SkillId, type World, type ZoneKind,
+  type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type Npc, type Point, type Quality, type SkillId, type World, type ZoneKind,
   ITEMS, PLAYER_ATTACK_ARC, SKILLS, classSkills, weaponInHand, PLAYER_ATTACK_RANGE, TICK_MS, TILE_WALL,
   isAlive, isMoving, isRoad, isWalkable, regionAt, step, tileAt,
 } from '../sim';
 import { TILE_HEIGHT, TILE_WIDTH, screenToWorld, tileToScreen } from './iso';
-import { GRADE_COLOR } from './itemText';
+import { QUALITY_COLOR } from './itemText';
 import { QUICK_KEYS } from './hotbar';
 import { NPC_LOOK } from './npcText';
 import { type AnimationName, HERO_SHEET, MONSTER_SHEET, NPC_SHEET, createAnimations, createCharacter, directionOf, hasSheet, playCharacter, preloadSheets } from './sheets';
@@ -21,6 +21,8 @@ const HOLD_REPEAT_MS = 120;
 /** Keyboard attacks aim at the nearest monster within this distance. */
 const AUTO_AIM_RANGE = PLAYER_ATTACK_RANGE + 1;
 const EFFECT_DEPTH = 100000;
+/** How much bigger an elder monster is drawn. */
+const ELDER_SCALE = 1.35;
 /** Screens with more pixels per inch get a larger canvas, so the picture stays sharp. Capped to keep it fast. */
 export const RENDER_SCALE = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
 /** Obstacle pictures are painted this many times larger than shown, so they stay sharp when the camera zooms in. */
@@ -61,7 +63,8 @@ export interface SceneEvents {
   onTick(world: World): void;
   onLevelUp(level: number, unlocked: SkillId[]): void;
   onSkillDenied(id: SkillId, reason: 'locked' | 'unlearned' | 'cooldown' | 'mana'): void;
-  onPickup(itemId: ItemId, count: number): void;
+  onPickup(itemId: ItemId, count: number, quality: Quality | null): void;
+  onXp(amount: number): void;
   onInventoryFull(): void;
   onToggleInventory(): void;
   onInteract(): void;
@@ -496,7 +499,8 @@ export class DungeonScene extends Phaser.Scene {
         this.showRing(0x7fe0a0);
         return false;
       case 'xpGained':
-        return false; // The experience bar shows it.
+        this.events_.onXp(event.amount);
+        return false;
       case 'levelUp':
         this.showRing(0xe8c36a);
         this.events_.onLevelUp(event.level, event.unlocked);
@@ -538,7 +542,8 @@ export class DungeonScene extends Phaser.Scene {
       }
       case 'monsterHit': {
         const at = tileToScreen(event.pos.x, event.pos.y);
-        this.floatNumber(at.x, at.y - 40, event.damage, '#ffe9a8');
+        this.floatNumber(at.x, at.y - (event.crit ? 52 : 40), event.damage, event.crit ? '#ff9a3c' : '#ffe9a8', event.crit);
+        if (event.crit) this.cameras.main.shake(60, 0.0025);
         const sprite = this.monsterSprites.get(event.id);
         if (sprite) this.flash(sprite.container);
         if (event.died && sprite?.sprite) this.showFallen(sprite, at);
@@ -573,7 +578,7 @@ export class DungeonScene extends Phaser.Scene {
       case 'lootDropped':
         return false; // Drawn every frame from the world's loot list.
       case 'itemPicked':
-        this.events_.onPickup(event.itemId, event.count);
+        this.events_.onPickup(event.itemId, event.count, event.quality ?? null);
         return true;
       case 'inventoryFull':
         this.events_.onInventoryFull();
@@ -608,11 +613,11 @@ export class DungeonScene extends Phaser.Scene {
     this.tweens.add({ targets: ring, scale: 3, alpha: 0, duration: 500, ease: 'Quad.easeOut', onComplete: () => ring.destroy() });
   }
 
-  private floatNumber(x: number, y: number, value: number, color: string): void {
+  private floatNumber(x: number, y: number, value: number, color: string, big = false): void {
     const text = this.add
       .text(x, y, this.events_.formatNumber(value), {
         fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-        fontSize: '18px',
+        fontSize: big ? '26px' : '18px',
         fontStyle: 'bold',
         color,
         stroke: '#12141a',
@@ -797,6 +802,8 @@ export class DungeonScene extends Phaser.Scene {
     const sprite = hasSheet(this, sheet) ? createCharacter(this, sheet) : null;
     const figure = this.add.container(0, 0, sprite ? [body, sprite] : [body]);
     const container = this.add.container(0, 0, [figure, bar]);
+    // An elder is plainly bigger than its kin.
+    if (monster.elder) figure.setScale(ELDER_SCALE);
     return { container, figure, body, sprite, direction: 1, bar, previous: { ...monster.pos }, lastHp: -1 };
   }
 
@@ -839,7 +846,8 @@ export class DungeonScene extends Phaser.Scene {
         playCharacter(this, sprite.sprite, sheet, monster.windup > 0 ? 'attack' : stepping ? 'run' : 'idle', sprite.direction);
       } else {
         const heading = monster.aggro ? tileToScreen(this.world.player.pos.x - x, this.world.player.pos.y - y).x : at.x - sprite.container.x;
-        if (Math.abs(heading) > 0.3) sprite.figure.setScale(heading < 0 ? -1 : 1, 1);
+        const size = monster.elder ? ELDER_SCALE : 1;
+        if (Math.abs(heading) > 0.3) sprite.figure.setScale(heading < 0 ? -size : size, size);
         sprite.figure.y = stepping ? -Math.abs(Math.sin(performance.now() / 90 + monster.id)) * 2 : 0;
       }
       sprite.container.setPosition(at.x, at.y).setDepth(x + y);
@@ -849,10 +857,17 @@ export class DungeonScene extends Phaser.Scene {
       if (key !== sprite.lastHp) {
         sprite.lastHp = key;
         this.drawMonsterBody(sprite, monster.kind, windingUp);
+        // An elder's golden tint and ring mark it from afar.
+        if (monster.elder) {
+          sprite.body.lineStyle(2, 0xe8c36a, 0.9).strokeEllipse(0, 0, 52, 26);
+          if (!windingUp) sprite.sprite?.setTint(0xffd98a);
+        }
         sprite.bar.clear();
-        if (monster.hp < monster.maxHp) {
-          sprite.bar.fillStyle(0x000000, 0.9).fillRect(-15, -48, 30, 5);
-          sprite.bar.fillStyle(0xd0463f).fillRect(-14, -47, 28 * (monster.hp / monster.maxHp), 3);
+        const top = monster.elder ? -48 * ELDER_SCALE : -48;
+        if (monster.hp < monster.maxHp || monster.elder) {
+          const half = monster.elder ? 22 : 15;
+          sprite.bar.fillStyle(0x000000, 0.9).fillRect(-half, top, half * 2, 5);
+          sprite.bar.fillStyle(monster.elder ? 0xe8a23a : 0xd0463f).fillRect(-half + 1, top + 1, (half * 2 - 2) * (monster.hp / monster.maxHp), 3);
         }
       }
     }
@@ -973,8 +988,10 @@ export class DungeonScene extends Phaser.Scene {
       g.fillStyle(0xcfd3dc).fillRect(-2, -15, 4, 5);
     } else {
       // Equipment glows in the colour of its grade so it stands out from afar.
-      const color = GRADE_COLOR[def.grade];
-      g.fillStyle(color, 0.25).fillCircle(0, -8, 13);
+      const quality = loot.mods?.quality ?? 'common';
+      const color = QUALITY_COLOR[quality];
+      // The better the find, the wider its glow.
+      g.fillStyle(color, quality === 'common' ? 0.2 : 0.35).fillCircle(0, -8, quality === 'epic' ? 20 : quality === 'rare' ? 17 : 13);
       g.fillStyle(color).fillPoints([{ x: 0, y: -18 }, { x: 7, y: -8 }, { x: 0, y: 2 }, { x: -7, y: -8 }], true);
       g.lineStyle(1.5, 0x12141a, 0.9).strokePoints([{ x: 0, y: -18 }, { x: 7, y: -8 }, { x: 0, y: 2 }, { x: -7, y: -8 }], true, true);
     }

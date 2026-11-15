@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type NpcKind, type RecipeId, type World, INVENTORY_SLOTS, ITEMS, MATERIAL_IDS, RECIPES, RECIPE_IDS, RECIPE_ITEMS, SHOP_STOCK,
-  addItem, buyPrice, characterOf, countItem, createWorld, hasIngredients, knowsRecipe, newCharacter, sellPrice, step,
+  QUALITIES, QUALITY, addItem, buyPrice, characterOf, countItem, createWorld, hasIngredients, knowsRecipe, newCharacter, sellPrice, step,
 } from '../src/sim';
 
 function at(kind: NpcKind | null, seed = 5): World {
@@ -65,12 +65,17 @@ describe('recipes', () => {
   });
 
   it('cannot be turned into a money machine', () => {
-    // Buying every ingredient and selling the result never pays, even when the work always succeeds.
+    // Buying every ingredient and selling the result does not pay. Plain goods never do, even when the
+    // work always succeeds; equipment comes out in random quality, so there it is the average that counts.
     const cost = (itemId: keyof typeof ITEMS): number => buyPrice(itemId);
+    const averageWorth = QUALITIES.reduce((sum, quality) => sum + (QUALITY[quality].weight / 100) * QUALITY[quality].worth, 0);
     for (const id of RECIPE_IDS) {
-      const { inputs, output } = RECIPES[id];
+      const { inputs, output, chance } = RECIPES[id];
       const spent = inputs.reduce((sum, input) => sum + cost(input.itemId) * input.count, 0);
       expect(sellPrice(output.itemId) * output.count, id).toBeLessThanOrEqual(spent);
+      if (ITEMS[output.itemId].kind === 'equipment') {
+        expect(sellPrice(output.itemId) * averageWorth * (chance / 100), id).toBeLessThanOrEqual(spent);
+      }
     }
   });
 });
@@ -132,7 +137,7 @@ describe('crafting at the blacksmith', () => {
       step(world, [{ type: 'craft', recipe: 'ironHelm' }]);
       const failed = types(world).includes('craftFailed');
       if (failed) failures += 1;
-      expect(world.player.inventory).toEqual(failed ? [] : [{ itemId: 'ironHelm', count: 1 }]);
+      expect(world.player.inventory.map((stack) => stack.itemId)).toEqual(failed ? [] : ['ironHelm']);
     }
     expect(failures / attempts).toBeGreaterThan(0.2);
     expect(failures / attempts).toBeLessThan(0.4);

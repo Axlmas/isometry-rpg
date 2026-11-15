@@ -1,6 +1,7 @@
 import { MAX_LEVEL, type MonsterKind, WORLD_SEED } from './balance';
 import type { GridMap, Point } from './grid';
-import { type Character, type ItemStack, newCharacter } from './inventory';
+import { type Character, type ItemStack, NO_ENCHANT, NO_GEAR, newCharacter, refreshVitals } from './inventory';
+import { type ItemMods, type Quality, copyMods } from './mods';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
 import type { ClassId, RaceId } from './classes';
 import type { RecipeId } from './crafting';
@@ -8,7 +9,7 @@ import type { DevAction } from './dev';
 import type { ItemTarget } from './enchant';
 import type { Npc, NpcKind } from './npcs';
 import type { Projectile } from './projectiles';
-import { heroMaxHp, heroMaxMp, monsterMaxHp } from './progression';
+import { monsterMaxHp } from './progression';
 import { createRng } from './rng';
 import type { SkillId } from './skills';
 import { type ZoneExit, type ZoneKind, buildZone } from './zones';
@@ -75,6 +76,8 @@ export interface Player {
   equipment: Record<EquipSlot, ItemId | null>;
   /** Enchantment level of each worn item. */
   equipmentEnchant: Record<EquipSlot, number>;
+  /** Quality and random properties of each worn item; null for a plain one or an empty slot. */
+  equipmentMods: Record<EquipSlot, ItemMods | null>;
   /** Goes up whenever coins, inventory or equipment change, so the client knows when to redraw them. */
   revision: number;
 }
@@ -86,6 +89,8 @@ export interface GroundLoot {
   count: number;
   /** Enchantment level of a piece of equipment; left out when it is zero. */
   enchant?: number;
+  /** Quality and properties of a piece of equipment; left out for a plain one. */
+  mods?: ItemMods;
   pos: Point;
   /** True while the hero should not pick it up: just dropped, or no room for it. */
   ignored: boolean;
@@ -97,6 +102,12 @@ export interface Monster {
   kind: MonsterKind;
   /** Sets its health, damage and the experience it gives. */
   level: number;
+  /** A rare, much stronger monster with a richer drop. */
+  elder: boolean;
+  /** Monsters of one pack share a number and come to each other's aid. */
+  pack: number;
+  /** True once it has raised the alarm (or answered one), so an alarm does not spread without end. */
+  called: boolean;
   /** Where the monster lives; it returns here when it loses the hero, and comes back here after dying. */
   home: Point;
   pos: Point;
@@ -127,7 +138,7 @@ export type GameEvent =
   | { type: 'projectileEnded'; id: number; pos: Point; kind: 'arrow' | 'bolt' }
   /** The hero's class cannot wield this weapon. */
   | { type: 'equipDenied'; itemId: ItemId }
-  | { type: 'monsterHit'; id: number; damage: number; pos: Point; died: boolean }
+  | { type: 'monsterHit'; id: number; damage: number; pos: Point; died: boolean; crit: boolean }
   | { type: 'monsterWindup'; id: number }
   | { type: 'playerHit'; damage: number }
   | { type: 'playerDied'; xpLost: number }
@@ -154,14 +165,14 @@ export type GameEvent =
   | { type: 'recipeLearned'; recipe: RecipeId }
   /** The hero tried to read a recipe they already know. */
   | { type: 'recipeDenied'; recipe: RecipeId }
-  | { type: 'crafted'; recipe: RecipeId; itemId: ItemId; count: number }
+  | { type: 'crafted'; recipe: RecipeId; itemId: ItemId; count: number; quality?: Quality }
   /** The attempt failed and the ingredients are gone. */
   | { type: 'craftFailed'; recipe: RecipeId }
   | { type: 'craftDenied'; recipe: RecipeId; reason: 'far' | 'unknown' | 'materials' | 'full' }
   | { type: 'guardStrike'; npcId: number; monsterId: number; damage: number; pos: Point; died: boolean }
   | { type: 'playerRespawned' }
   | { type: 'lootDropped'; id: number }
-  | { type: 'itemPicked'; itemId: ItemId; count: number }
+  | { type: 'itemPicked'; itemId: ItemId; count: number; quality?: Quality }
   | { type: 'inventoryFull' }
   /** The hero asked to leave through an exit; the client builds the next zone. */
   | { type: 'travel'; to: ZoneKind };
@@ -265,11 +276,14 @@ export function createWorld(
 
   const monsters: Monster[] = layout.monsters.map((spot, id) => {
     const monsterLevel = spot.level ?? dungeonLevel;
-    const hp = monsterMaxHp(monsterLevel, spot.kind);
+    const hp = monsterMaxHp(monsterLevel, spot.kind, spot.elder);
     return {
       id,
       kind: spot.kind,
       level: monsterLevel,
+      elder: spot.elder,
+      pack: spot.pack,
+      called: false,
       home: spot.home,
       pos: { ...spot.home },
       hp,
@@ -283,7 +297,7 @@ export function createWorld(
     };
   });
 
-  return {
+  const world: World = {
     seed: seed >>> 0,
     tick: 0,
     rngState: rng.state,
@@ -300,12 +314,12 @@ export function createWorld(
       path: [],
       distance: 0,
       // Carried-over health is kept within sensible bounds; a hero never arrives dead.
-      hp: carried(character.hp, 1, heroMaxHp(level, race, cls)),
-      maxHp: heroMaxHp(level, race, cls),
+      hp: 1,
+      maxHp: 1,
       level,
       xp: character.xp,
-      mp: carried(character.mp, 0, heroMaxMp(level, race, cls)),
-      maxMp: heroMaxMp(level, race, cls),
+      mp: 0,
+      maxMp: 0,
       skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0, powerShot: 0, volley: 0, swiftness: 0, fireBolt: 0, frostNova: 0, mend: 0 },
       hasteTicks: 0,
       hasteFactor: 1,
@@ -319,8 +333,17 @@ export function createWorld(
       ticksSinceHurt: 0,
       coins: character.coins,
       inventory: character.inventory.map((stack) => ({ ...stack })),
-      equipment: { ...character.equipment },
-      equipmentEnchant: { weapon: 0, helmet: 0, armor: 0, boots: 0, ...character.equipmentEnchant },
+      equipment: { ...NO_GEAR, ...character.equipment },
+      equipmentEnchant: { ...NO_ENCHANT, ...character.equipmentEnchant },
+      equipmentMods: {
+        weapon: copyMods(character.equipmentMods?.weapon) ?? null,
+        helmet: copyMods(character.equipmentMods?.helmet) ?? null,
+        armor: copyMods(character.equipmentMods?.armor) ?? null,
+        gloves: copyMods(character.equipmentMods?.gloves) ?? null,
+        boots: copyMods(character.equipmentMods?.boots) ?? null,
+        ring: copyMods(character.equipmentMods?.ring) ?? null,
+        amulet: copyMods(character.equipmentMods?.amulet) ?? null,
+      },
       revision: 0,
     },
     monsters,
@@ -334,6 +357,12 @@ export function createWorld(
     nextLootId: 0,
     events: [],
   };
+  // Maximum health and mana depend on what the hero wears.
+  const { player } = world;
+  refreshVitals(player);
+  player.hp = carried(character.hp, 1, player.maxHp);
+  player.mp = carried(character.mp, 0, player.maxMp);
+  return world;
 }
 
 export function isAlive(world: World): boolean {

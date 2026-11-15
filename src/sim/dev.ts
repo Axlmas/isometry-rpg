@@ -1,4 +1,7 @@
 import { addItem } from './inventory';
+import { ITEMS, droppableEquipment } from './items';
+import { rollMods } from './mods';
+import { createRng } from './rng';
 import { grantXp, xpToNextLevel } from './progression';
 import type { World } from './world';
 import { ROAD_ROW, HOLLOW_BORDER } from './zones';
@@ -13,6 +16,8 @@ export type DevAction =
   | { action: 'coins' }
   /** Materials, crystals, scrolls and potions: enough to try crafting and tempering. */
   | { action: 'kit' }
+  /** A handful of random equipment with rolled quality and properties. */
+  | { action: 'gear' }
   | { action: 'heal' }
   /** Kills every monster near the hero, with loot and experience as usual. */
   | { action: 'clear' }
@@ -35,6 +40,17 @@ export function runDevAction(world: World, dev: DevAction): void {
         ['scrollWeaponPlain', 10], ['scrollArmorPlain', 10], ['healthPotion', 20], ['manaPotion', 20], ['chargePlain', 500],
       ] as const) addItem(player, itemId, count);
       return;
+    case 'gear': {
+      const rng = createRng(world.rngState);
+      const pool = [...droppableEquipment('none'), ...droppableEquipment('d')];
+      for (let i = 0; i < 6; i++) {
+        const itemId = pool[rng.int(0, pool.length - 1)] as (typeof pool)[number];
+        const def = ITEMS[itemId];
+        if (def.kind === 'equipment') addItem(player, itemId, 1, 0, rollMods(rng, def, true));
+      }
+      world.rngState = rng.state;
+      return;
+    }
     case 'heal':
       if (player.hp > 0) {
         player.hp = player.maxHp;

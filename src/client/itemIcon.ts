@@ -1,4 +1,4 @@
-import { type ItemId, ITEMS } from '../sim';
+import { type ItemId, type Quality, ITEMS } from '../sim';
 
 // Item icons are drawn here as small vector pictures, so the game ships no
 // image files. Every icon fits a 32x32 box. All the markup below is fixed
@@ -61,6 +61,20 @@ const staff = (wood: string, orb: string): string => `
   <path d="M8 28 L22 9" stroke="${wood}" stroke-width="3.5" stroke-linecap="round"/>
   <circle cx="23" cy="8" r="5" fill="${orb}" ${OUTLINE}/><circle cx="21.5" cy="6.5" r="1.6" fill="#ffffff" opacity="0.8"/>`;
 
+const glove = (color: string, shade: string): string => `
+  <path d="M9 27 V15 L7 9 Q8 6 10.5 8 L12 12 V6 Q13.5 3.5 15 6 V11 V5 Q16.5 2.5 18 5 V11 V6 Q19.5 3.5 21 6 V13 L23 11 Q25.5 10 25 13 L22 19 V27 Z" fill="${color}" ${OUTLINE}/>
+  <path d="M9 22 H22" stroke="${shade}" stroke-width="2.5"/>`;
+
+const ring = (metal: string, gem: string): string => `
+  <circle cx="16" cy="19" r="8" fill="none" stroke="#12141a" stroke-width="5.5"/>
+  <circle cx="16" cy="19" r="8" fill="none" stroke="${metal}" stroke-width="3"/>
+  <path d="M16 4 L20 9 L16 13 L12 9 Z" fill="${gem}" ${OUTLINE}/>`;
+
+const amulet = (cord: string, stone: string): string => `
+  <path d="M7 4 Q16 18 25 4" fill="none" stroke="${cord}" stroke-width="2" stroke-linecap="round"/>
+  <path d="M16 13 L22 20 L16 28 L10 20 Z" fill="${stone}" ${OUTLINE}/>
+  <path d="M16 13 V28 M10 20 H22" stroke="#ffffff" stroke-width="1" opacity="0.5"/>`;
+
 const IRON = '#b8bcc6';
 const IRON_DARK = '#7f8591';
 const LEATHER = '#a8743e';
@@ -97,6 +111,13 @@ const ICONS: Record<ItemId, string> = {
   leatherBoots: boot(LEATHER, LEATHER_DARK),
   ironGreaves: boot(D_STEEL, D_STEEL_DARK),
 
+  leatherGloves: glove(LEATHER, LEATHER_DARK),
+  ironGauntlets: glove(D_STEEL, D_STEEL_DARK),
+  copperRing: ring('#c9814a', '#7fe0a0'),
+  silverRing: ring('#d5dbe6', '#5fa8ff'),
+  boneAmulet: amulet('#8a6a45', '#ece6d6'),
+  silverAmulet: amulet('#d5dbe6', '#c58bff'),
+
   healthPotion: flask('#d9534f'),
   manaPotion: flask('#4f8fe0'),
   chargePlain: crystal('#cfd3dc', '#ffffff'),
@@ -118,12 +139,13 @@ const ICONS: Record<ItemId, string> = {
 };
 
 /** An element showing the item's picture. Purely decorative: the name is given in text elsewhere. */
-export function itemIcon(itemId: ItemId): HTMLElement {
+export function itemIcon(itemId: ItemId, quality?: Quality): HTMLElement {
   const holder = document.createElement('span');
   holder.className = 'icon';
   holder.setAttribute('aria-hidden', 'true');
   holder.innerHTML = `<svg viewBox="0 0 32 32" width="100%" height="100%">${ICONS[itemId]}</svg>`;
   const def = ITEMS[itemId];
   if (def.kind === 'equipment' || def.kind === 'scroll') holder.dataset.grade = def.grade;
+  if (def.kind === 'equipment') holder.dataset.quality = quality ?? 'common';
   return holder;
 }

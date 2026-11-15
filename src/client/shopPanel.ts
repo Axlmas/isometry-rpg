@@ -1,5 +1,5 @@
 import type { I18n } from '../i18n';
-import { type Command, type ItemId, type NpcKind, type World, SHOP_STOCK, buyPrice, isNear, maxStackOf, sellPrice } from '../sim';
+import { type Command, type ItemId, type NpcKind, type World, SHOP_STOCK, buyPrice, isNear, maxStackOf, sellPrice, worthOf } from '../sim';
 import { NPC_NAME } from './npcText';
 import { describeItem, element, make } from './itemView';
 
@@ -71,8 +71,8 @@ export class ShopPanel {
     element('shop-bag').replaceChildren(
       ...player.inventory.map((stack, index) => {
         const row = make('li', 'item-row');
-        row.append(describeItem(i18n, stack.itemId as ItemId, stack.count, stack.enchant ?? 0));
-        const price = sellPrice(stack.itemId);
+        row.append(describeItem(i18n, stack.itemId as ItemId, stack.count, stack.enchant ?? 0, stack.mods));
+        const price = sellPrice(stack.itemId, worthOf(stack.mods));
         if (price <= 0) {
           row.append(make('span', 'item-empty', i18n.t('shop.noValue')));
           return row;

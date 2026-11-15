@@ -18,6 +18,7 @@ import { ShopPanel } from './shopPanel';
 import { Hotbar } from './hotbar';
 import { Minimap } from './minimap';
 import { MONSTER_NAME } from './npcText';
+import { QUALITY_NAME } from './itemText';
 import { TrainerPanel } from './trainerPanel';
 import { CLASS_NAME, RACE_NAME, SKILL_NAME } from './skillText';
 import { REGION_NAME } from './zoneText';
@@ -227,7 +228,9 @@ function showNotice(event: GameEvent): void {
       hud.log(i18n.t('log.recipeKnown'), true);
       return;
     case 'crafted':
-      if (event.itemId !== 'coins') hud.log(i18n.t('log.crafted', { item: itemName(i18n, event.itemId), count: event.count }));
+      if (event.itemId === 'coins') return;
+      if (event.quality && event.quality !== 'common') hud.log(i18n.t('log.craftedQuality', { item: itemName(i18n, event.itemId), quality: i18n.t(QUALITY_NAME[event.quality]) }));
+      else hud.log(i18n.t('log.crafted', { item: itemName(i18n, event.itemId), count: event.count }));
       return;
     case 'craftFailed':
       hud.log(i18n.t('log.craftFailed', { item: itemName(i18n, RECIPES[event.recipe].output.itemId as Exclude<ItemId, 'coins'>) }), true);
@@ -274,20 +277,22 @@ const scene = new DungeonScene(world, {
     else if (reason === 'cooldown') hud.log(i18n.t('log.skillCooling'), true);
     else hud.log(i18n.t('log.skillLocked', { level: SKILLS[id].unlockLevel }), true);
   },
-  onPickup: (itemId, count) => {
+  onPickup: (itemId, count, quality) => {
     if (itemId === 'coins') {
       hud.log(i18n.t('log.coins', { count }));
       return;
     }
     const item = itemName(i18n, itemId);
-    hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
+    if (quality && quality !== 'common') hud.log(i18n.t('log.pickedQuality', { item, quality: i18n.t(QUALITY_NAME[quality]) }));
+    else hud.log(count > 1 ? i18n.t('log.pickedMany', { item, count }) : i18n.t('log.picked', { item }));
   },
+  onXp: (amount) => hud.log(i18n.t('log.xp', { amount })),
   onInventoryFull: () => hud.log(i18n.t('log.full'), true),
   onToggleInventory: () => inventory.toggle(),
   onInteract: interact,
   onReady: () => document.getElementById('loading')?.remove(),
   onTarget: (monster) =>
-    hud.setTarget(monster ? { name: i18n.t(MONSTER_NAME[monster.kind]), level: monster.level, hp: monster.hp, maxHp: monster.maxHp } : null),
+    hud.setTarget(monster ? { name: monster.elder ? i18n.t('monster.elder', { name: i18n.t(MONSTER_NAME[monster.kind]) }) : i18n.t(MONSTER_NAME[monster.kind]), level: monster.level, hp: monster.hp, maxHp: monster.maxHp } : null),
   onNotice: showNotice,
   formatNumber: (value) =>
     new Intl.NumberFormat(i18n.locale === PSEUDO_LOCALE ? SOURCE_LOCALE : i18n.locale).format(value),

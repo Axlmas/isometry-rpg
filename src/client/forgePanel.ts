@@ -1,5 +1,6 @@
 import type { I18n } from '../i18n';
 import {
+  type ItemMods,
   type Command, type ItemId, type ItemTarget, type World,
   ENCHANT_MAX, EQUIP_SLOTS, ITEMS, RECIPES, RECIPE_IDS, SHOP_STOCK, buyPrice, countItem, crystalsFor, enchantChance,
   hasIngredients, isNear, knowsRecipe, maxStackOf, scrollFor,
@@ -71,23 +72,23 @@ export class ForgePanel {
     const { i18n } = this;
     const { player } = world;
     // Everything that can be tempered: worn items first, then the bag.
-    const targets: Array<{ target: ItemTarget; itemId: ItemId; level: number; bagIndex: number | null }> = [];
+    const targets: Array<{ target: ItemTarget; itemId: ItemId; level: number; mods: ItemMods | null; bagIndex: number | null }> = [];
     for (const slot of EQUIP_SLOTS) {
       const itemId = player.equipment[slot];
-      if (itemId) targets.push({ target: { kind: 'slot', slot }, itemId, level: player.equipmentEnchant[slot], bagIndex: null });
+      if (itemId) targets.push({ target: { kind: 'slot', slot }, itemId, level: player.equipmentEnchant[slot], mods: player.equipmentMods[slot], bagIndex: null });
     }
     player.inventory.forEach((stack, index) => {
       if (ITEMS[stack.itemId].kind === 'equipment') {
-        targets.push({ target: { kind: 'bag', index }, itemId: stack.itemId, level: stack.enchant ?? 0, bagIndex: index });
+        targets.push({ target: { kind: 'bag', index }, itemId: stack.itemId, level: stack.enchant ?? 0, mods: stack.mods ?? null, bagIndex: index });
       }
     });
 
     element('forge-empty').hidden = targets.length > 0;
     element('forge-items').replaceChildren(
-      ...targets.map(({ target, itemId, level, bagIndex }) => {
+      ...targets.map(({ target, itemId, level, mods, bagIndex }) => {
         const def = ITEMS[itemId];
         const row = make('li', 'item-row');
-        row.append(describeItem(i18n, itemId, 1, level));
+        row.append(describeItem(i18n, itemId, 1, level, mods));
         if (def.kind !== 'equipment') return row;
         const scroll = scrollFor(def);
         const have = countItem(player, scroll);

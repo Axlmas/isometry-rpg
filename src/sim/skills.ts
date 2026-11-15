@@ -1,6 +1,7 @@
-import { CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, TICK_MS } from './balance';
+import { CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, TICK_MS } from './balance';
 import type { ClassId } from './classes';
 import { hitMonstersAround } from './combat';
+import { attackCooldown } from './inventory';
 import type { Point } from './grid';
 import { spendCharge } from './inventory';
 import type { World } from './world';
@@ -88,7 +89,7 @@ export function useSkill(world: World, id: SkillId, dir: Point | null): void {
     if (player.pendingAttack !== null) return;
     const aim = dir ?? player.facing;
     player.facing = aim;
-    player.attackCooldown = PLAYER_ATTACK_COOLDOWN;
+    player.attackCooldown = attackCooldown(player);
     charged = spendCharge(world);
     const multiplier = effect.multiplier * (charged ? CHARGE_DAMAGE_MULTIPLIER : 1);
     player.pendingAttack =

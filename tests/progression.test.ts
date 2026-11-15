@@ -104,7 +104,7 @@ describe('dungeon level', () => {
     expect(createWorld(1).dungeonLevel).toBe(1);
     const deep = createWorld(1, { ...newCharacter('trainingSword'), level: 7 });
     expect(deep.dungeonLevel).toBe(7);
-    expect(deep.monsters.every((m) => m.maxHp === monsterMaxHp(7) && m.hp === m.maxHp)).toBe(true);
+    expect(deep.monsters.every((m) => m.maxHp === monsterMaxHp(7, m.kind, m.elder) && m.hp === m.maxHp)).toBe(true);
     expect(monsterMaxHp(1)).toBe(MONSTER_MAX_HP);
     expect(monsterMaxHp(7)).toBeGreaterThan(MONSTER_MAX_HP);
     expect(monsterXp(7)).toBeGreaterThan(monsterXp(1));

@@ -1,11 +1,20 @@
 import type { I18n } from '../i18n';
 import {
-  type Command, type EquipSlot, type ItemDef, type ItemId, type World,
-  CLASSES, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, enchantBonus, playerDamage, playerDefense, sellPrice,
+  type Command, type EquipSlot, type ItemDef, type ItemId, type ItemMods, type World,
+  CLASSES, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, attackCooldown, critChance, gearStats, playerDamage, playerDefense, sellPrice, worthOf,
+  PLAYER_ATTACK_COOLDOWN,
 } from '../sim';
 import { itemIcon } from './itemIcon';
-import { GRADE_COLOR, GRADE_NAME, SLOT_NAME, WEAPON_NAME } from './itemText';
-import { element, itemEffect, itemName, make } from './itemView';
+import { GRADE_NAME, SLOT_NAME, WEAPON_NAME, qualityCss } from './itemText';
+import { affixText, element, gearKind, gearScore, itemEffect, itemName, make } from './itemView';
+
+/** An item as the panel shows it: what it is, how many, and what makes this copy special. */
+interface Shown {
+  itemId: ItemId;
+  count: number;
+  enchant: number;
+  mods: ItemMods | null;
+}
 
 /** Which cell the player has picked: a worn slot or a place in the bag. */
 type Selection = { kind: 'slot'; slot: EquipSlot } | { kind: 'bag'; index: number } | null;
@@ -78,22 +87,23 @@ export class InventoryPanel {
     if (!world) return;
     const { player } = world;
     const [min, max] = playerDamage(player);
-    element('hero-stats').textContent = i18n.t('inventory.stats', { min, max, defense: playerDefense(player) });
+    element('hero-stats').textContent = i18n.t('inventory.stats', { min, max, defense: playerDefense(player), crit: critChance(player) });
+    const gear = gearStats(player);
+    const haste = Math.round((PLAYER_ATTACK_COOLDOWN / attackCooldown(player) - 1) * 100);
+    element('hero-bonus').textContent = i18n.t('inventory.bonus', { power: gear.power, haste, speed: gear.speed });
     element('coins').textContent = i18n.t('hud.coins', { count: player.coins });
 
     if (!this.isOpen || (!force && player.revision === this.drawnRevision)) return;
     this.drawnRevision = player.revision;
 
     for (const slot of EQUIP_SLOTS) {
-      const itemId = player.equipment[slot];
       const label = i18n.t(SLOT_NAME[slot]);
-      const enchant = player.equipmentEnchant[slot];
-      this.fillCell(this.slotCells.get(slot) as Cell, itemId, 1, enchant, itemId ? `${label}: ${this.spoken(itemId, 1, enchant)}` : `${label}: ${i18n.t('inventory.emptySlot')}`, force, label);
+      const item = this.itemAt({ kind: 'slot', slot });
+      this.fillCell(this.slotCells.get(slot) as Cell, item, item ? `${label}: ${this.spoken(item)}` : `${label}: ${i18n.t('inventory.emptySlot')}`, force, label);
     }
     this.bagCells.forEach((cell, index) => {
-      const stack = player.inventory[index];
-      const enchant = stack?.enchant ?? 0;
-      this.fillCell(cell, stack?.itemId ?? null, stack?.count ?? 0, enchant, stack ? this.spoken(stack.itemId, stack.count, enchant) : i18n.t('inventory.emptyCell'), force);
+      const item = this.itemAt({ kind: 'bag', index });
+      this.fillCell(cell, item, item ? this.spoken(item) : i18n.t('inventory.emptyCell'), force);
     });
     element('inventory-count').textContent = i18n.t('inventory.bag', { used: player.inventory.length, total: INVENTORY_SLOTS });
 
@@ -119,8 +129,11 @@ export class InventoryPanel {
     return { root, shown: '' };
   }
 
-  private fillCell(cell: Cell, itemId: ItemId | null, count: number, enchant: number, spoken: string, force: boolean, emptyLabel = ''): void {
-    const shown = `${itemId ?? ''}/${count}/${enchant}/${emptyLabel}`;
+  private fillCell(cell: Cell, item: Shown | null, spoken: string, force: boolean, emptyLabel = ''): void {
+    const itemId = item?.itemId ?? null;
+    const count = item?.count ?? 0;
+    const enchant = item?.enchant ?? 0;
+    const shown = `${this.identity(item) ?? ''}/${count}/${emptyLabel}`;
     if (!force && shown === cell.shown) return;
     cell.shown = shown;
     cell.root.setAttribute('aria-label', spoken);
@@ -128,32 +141,35 @@ export class InventoryPanel {
     if (itemId === null) {
       // An empty worn slot says what belongs there; an empty bag cell is just empty.
       cell.root.replaceChildren(...(emptyLabel ? [make('span', 'cell-label', emptyLabel)] : []));
-      delete cell.root.dataset.grade;
+      delete cell.root.dataset.quality;
       return;
     }
     const def = ITEMS[itemId];
-    if (def.kind === 'equipment') cell.root.dataset.grade = def.grade;
-    else delete cell.root.dataset.grade;
+    if (def.kind === 'equipment') cell.root.dataset.quality = item?.mods?.quality ?? 'common';
+    else delete cell.root.dataset.quality;
     const parts: HTMLElement[] = [itemIcon(itemId)];
+    if (def.kind === 'equipment' && def.grade === 'd') parts.push(make('span', 'cell-grade', this.i18n.t('grade.dShort')));
     if (count > 1) parts.push(make('span', 'cell-count', String(count)));
     if (enchant > 0) parts.push(make('span', 'cell-enchant', `+${enchant}`));
     cell.root.replaceChildren(...parts);
   }
 
-  private itemAt(where: NonNullable<Selection>): { itemId: ItemId; count: number; enchant: number } | null {
+  private itemAt(where: NonNullable<Selection>): Shown | null {
     const player = this.world?.player;
     if (!player) return null;
     if (where.kind === 'slot') {
       const itemId = player.equipment[where.slot];
-      return itemId ? { itemId, count: 1, enchant: player.equipmentEnchant[where.slot] } : null;
+      return itemId ? { itemId, count: 1, enchant: player.equipmentEnchant[where.slot], mods: player.equipmentMods[where.slot] } : null;
     }
     const stack = player.inventory[where.index];
-    return stack ? { itemId: stack.itemId, count: stack.count, enchant: stack.enchant ?? 0 } : null;
+    return stack ? { itemId: stack.itemId, count: stack.count, enchant: stack.enchant ?? 0, mods: stack.mods ?? null } : null;
   }
 
   /** Tells one item from another, so the selection is dropped when a different item lands in the picked cell. */
-  private identity(item: { itemId: ItemId; enchant: number } | null): string | null {
-    return item ? `${item.itemId}+${item.enchant}` : null;
+  private identity(item: Shown | null): string | null {
+    if (!item) return null;
+    const mods = item.mods ? `${item.mods.quality}:${item.mods.affixes.map((affix) => `${affix.stat}${affix.value}`).join(',')}` : '';
+    return `${item.itemId}+${item.enchant}/${mods}`;
   }
 
   /** The obvious thing to do with an item, and its name as a translation key; null when there is none. */
@@ -185,8 +201,9 @@ export class InventoryPanel {
   // ------------------------------------------------------- item description
 
   /** Everything there is to say about an item, line by line. Used by the tooltip and the panel under the grid. */
-  private lines(itemId: ItemId, count: number, enchant: number): { name: string; color: string | null; lines: string[]; better: boolean } {
+  private lines({ itemId, count, enchant, mods }: Shown): { name: string; color: string | null; lines: string[]; affixes: string[]; better: boolean } {
     const { i18n } = this;
+    const affixes = (mods?.affixes ?? []).map((affix) => affixText(i18n, affix));
     const def = ITEMS[itemId];
     const base = itemId === 'coins' ? '' : itemName(i18n, itemId, enchant);
     const name = count > 1 ? i18n.t('inventory.stack', { item: base, count }) : base;
@@ -194,37 +211,37 @@ export class InventoryPanel {
     let color: string | null = null;
     let better = false;
     if (def.kind === 'equipment') {
-      color = `#${GRADE_COLOR[def.grade].toString(16).padStart(6, '0')}`;
+      color = qualityCss(mods?.quality ?? 'common');
       // A weapon says what kind it is, because only one class can use it.
       const kind = def.slot === 'weapon' ? i18n.t(WEAPON_NAME[def.weaponType]) : i18n.t(SLOT_NAME[def.slot]);
-      lines.push(`${kind} · ${i18n.t(GRADE_NAME[def.grade])}`);
-      better = this.isBetter(def, enchant);
+      lines.push(gearKind(i18n, kind, def, mods));
+      better = this.isBetter(def, enchant, mods);
     } else if (def.kind === 'scroll' || (def.kind === 'consumable' && def.effect.kind === 'charge')) {
       lines.push(i18n.t(GRADE_NAME[def.kind === 'scroll' ? def.grade : (def.effect as { grade: 'none' | 'd' }).grade]));
     }
-    lines.push(itemEffect(i18n, itemId, enchant));
-    const price = sellPrice(itemId);
-    lines.push(price > 0 ? i18n.t('tooltip.sells', { price }) : i18n.t('tooltip.noValue'));
-    return { name, color, lines, better };
+    lines.push(itemEffect(i18n, itemId, enchant, mods));
+    const price = sellPrice(itemId, worthOf(mods));
+    const value = price > 0 ? i18n.t('tooltip.sells', { price }) : i18n.t('tooltip.noValue');
+    return { name, color, lines: [...lines, ...affixes, value], affixes, better };
   }
 
   /** The description as one sentence, for screen readers. */
-  private spoken(itemId: ItemId, count: number, enchant: number): string {
-    const { name, lines } = this.lines(itemId, count, enchant);
+  private spoken(item: Shown): string {
+    const { name, lines } = this.lines(item);
     return [name, ...lines].join('. ');
   }
 
-  private describe(itemId: ItemId, count: number, enchant: number, worn: boolean): HTMLElement[] {
-    const { name, color, lines, better } = this.lines(itemId, count, enchant);
+  private describe(item: Shown, worn: boolean): HTMLElement[] {
+    const { name, color, lines, affixes, better } = this.lines(item);
     const title = make('strong', 'item-name', name);
     if (color) title.style.color = color;
-    const nodes: HTMLElement[] = [title, ...lines.map((line) => make('span', 'item-detail', line))];
+    const nodes: HTMLElement[] = [title, ...lines.map((line) => make('span', affixes.includes(line) ? 'item-affix' : 'item-detail', line))];
     if (better && !worn) nodes.push(make('span', 'item-better', this.i18n.t('inventory.better')));
     return nodes;
   }
 
-  /** Compares an item, enchantment included, with what is worn in its slot. */
-  private isBetter(def: Extract<ItemDef, { kind: 'equipment' }>, enchant: number): boolean {
+  /** Compares an item, with its enchantment and properties, with what is worn in its slot. */
+  private isBetter(def: Extract<ItemDef, { kind: 'equipment' }>, enchant: number, mods: ItemMods | null): boolean {
     const player = this.world?.player;
     if (!player) return false;
     // A weapon the hero's class cannot use is never an improvement.
@@ -233,12 +250,7 @@ export class InventoryPanel {
     if (!wornId) return true;
     const worn = ITEMS[wornId];
     if (worn.kind !== 'equipment') return true;
-    const mine = enchantBonus(def, enchant);
-    const theirs = enchantBonus(worn, player.equipmentEnchant[def.slot]);
-    if (def.slot === 'weapon' && worn.slot === 'weapon') {
-      return def.damage[0] + def.damage[1] + mine * 2 > worn.damage[0] + worn.damage[1] + theirs * 2;
-    }
-    return def.slot !== 'weapon' && worn.slot !== 'weapon' && def.defense + mine > worn.defense + theirs;
+    return gearScore(def, enchant, mods) > gearScore(worn, player.equipmentEnchant[def.slot], player.equipmentMods[def.slot]);
   }
 
   // ------------------------------------------------- selection and tooltip
@@ -256,7 +268,7 @@ export class InventoryPanel {
       return;
     }
     const text = make('div', 'detail-text');
-    text.append(...this.describe(item.itemId, item.count, item.enchant, selection.kind === 'slot'));
+    text.append(...this.describe(item, selection.kind === 'slot'));
     const actions = make('div', 'detail-actions');
     const action = this.primary(selection);
     if (action) actions.append(this.button(action.label, action.command, true));
@@ -278,7 +290,7 @@ export class InventoryPanel {
       tooltip.hidden = true;
       return;
     }
-    const nodes = this.describe(item.itemId, item.count, item.enchant, where.kind === 'slot');
+    const nodes = this.describe(item, where.kind === 'slot');
     const action = this.primary(where);
     if (action) nodes.push(make('span', 'tooltip-hint', action.hint));
     tooltip.replaceChildren(...nodes);

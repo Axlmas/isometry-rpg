@@ -1,9 +1,10 @@
 import {
-  DEATH_XP_LOSS, MAX_LEVEL, type MonsterKind, MONSTER_KINDS, MONSTER_DAMAGE_PER_LEVEL, MONSTER_HP_PER_LEVEL, MONSTER_MAX_HP, MONSTER_XP,
+  DEATH_XP_LOSS, ELDER, MAX_LEVEL, type MonsterKind, MONSTER_KINDS, MONSTER_DAMAGE_PER_LEVEL, MONSTER_HP_PER_LEVEL, MONSTER_MAX_HP, MONSTER_XP,
   MONSTER_XP_PER_LEVEL, PLAYER_DAMAGE_PER_LEVEL, PLAYER_HP_PER_LEVEL, PLAYER_MAX_HP, PLAYER_MAX_MP,
   PLAYER_MP_PER_LEVEL, XP_CURVE_BASE, XP_CURVE_POWER,
 } from './balance';
 import { type ClassId, type RaceId, CLASSES, RACES } from './classes';
+import { refreshVitals } from './inventory';
 import { type SkillId, SKILLS, SKILL_IDS } from './skills';
 import type { World } from './world';
 
@@ -34,14 +35,15 @@ export function damageBonusAtLevel(level: number): number {
 }
 
 // Monsters grow with the zone's level so that a stronger hero still has a fight.
-export function monsterMaxHp(zoneLevel: number, kind: MonsterKind = 'grunt'): number {
-  return Math.round(MONSTER_MAX_HP * (1 + MONSTER_HP_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].hp);
+// An elder is the same beast, several times over.
+export function monsterMaxHp(zoneLevel: number, kind: MonsterKind = 'grunt', elder = false): number {
+  return Math.round(MONSTER_MAX_HP * (1 + MONSTER_HP_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].hp * (elder ? ELDER.hp : 1));
 }
-export function monsterDamageBonus(zoneLevel: number, kind: MonsterKind = 'grunt'): number {
-  return (1 + MONSTER_DAMAGE_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].damage;
+export function monsterDamageBonus(zoneLevel: number, kind: MonsterKind = 'grunt', elder = false): number {
+  return (1 + MONSTER_DAMAGE_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].damage * (elder ? ELDER.damage : 1);
 }
-export function monsterXp(zoneLevel: number, kind: MonsterKind = 'grunt'): number {
-  return Math.round(MONSTER_XP * (1 + MONSTER_XP_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].xp);
+export function monsterXp(zoneLevel: number, kind: MonsterKind = 'grunt', elder = false): number {
+  return Math.round(MONSTER_XP * (1 + MONSTER_XP_PER_LEVEL * (zoneLevel - 1)) * MONSTER_KINDS[kind].xp * (elder ? ELDER.xp : 1));
 }
 
 /** Skills that become available exactly at `level`: of one class, or of all when none is given. */
@@ -58,8 +60,7 @@ export function grantXp(world: World, amount: number): void {
   while (player.level < MAX_LEVEL && player.xp >= xpToNextLevel(player.level)) {
     player.xp -= xpToNextLevel(player.level);
     player.level += 1;
-    player.maxHp = heroMaxHp(player.level, player.race, player.cls);
-    player.maxMp = heroMaxMp(player.level, player.race, player.cls);
+    refreshVitals(player);
     // A new level is a moment of relief: the hero is fully restored.
     player.hp = player.maxHp;
     player.mp = player.maxMp;

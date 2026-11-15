@@ -1,7 +1,7 @@
 import {
-  type Character, type ClassId, type EquipSlot, type RaceId, type ItemId, type ItemStack, type RecipeId, type SkillId, type World, type ZoneKind,
-  CLASSES, ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, RECIPES, SKILLS, PLAYER_RADIUS, STARTING_WEAPON,
-  circleFree, createWorld, isClassId, isItemId, isRaceId, isRecipeId, isSkillId, isZoneKind, maxStackOf, newCharacter, xpToNextLevel,
+  type Character, type ClassId, type EquipSlot, type RaceId, type ItemId, type ItemMods, type ItemStack, type RecipeId, type SkillId, type World, type ZoneKind,
+  CLASSES, ENCHANT_MAX, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MAX_LEVEL, NO_ENCHANT, NO_GEAR, RECIPES, SKILLS, PLAYER_RADIUS,
+  circleFree, createWorld, isClassId, isItemId, isRaceId, isRecipeId, isSkillId, isZoneKind, maxStackOf, copyMods, validMods, xpToNextLevel,
 } from '../sim';
 
 /**
@@ -9,7 +9,7 @@ import {
  * older save is not converted: the player starts a new hero. Once the game
  * has real players, add a migration step here instead.
  */
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 const SAVE_KEY = 'isometry-rpg.save';
 const LOCALE_KEY = 'isometry-rpg.locale';
 
@@ -43,16 +43,18 @@ interface SaveData {
   chargesOn: boolean;
   coins: number;
   /** `enchant` is the enchantment level of a piece of equipment; left out when zero. */
-  inventory: Array<{ id: ItemId; count: number; enchant?: number }>;
+  inventory: Array<{ id: ItemId; count: number; enchant?: number; mods?: ItemMods }>;
   equipment: Record<EquipSlot, ItemId | null>;
   /** Enchantment level of each worn item. */
   enchants: Record<EquipSlot, number>;
+  /** Quality and properties of each worn item; null for a plain one. */
+  mods: Record<EquipSlot, ItemMods | null>;
   /** Skills learned from the trainer. */
   skills: SkillId[];
   /** Recipes learned from recipe items. */
   recipes: RecipeId[];
   /** Items lying on the floor. */
-  loot: Array<{ id: ItemId; count: number; enchant?: number; x: number; y: number }>;
+  loot: Array<{ id: ItemId; count: number; enchant?: number; mods?: ItemMods; x: number; y: number }>;
 }
 
 export type LoadResult =
@@ -102,12 +104,13 @@ export function serializeWorld(world: World): string {
     dungeonLevel: world.dungeonLevel,
     chargesOn: world.player.chargesOn,
     coins: world.player.coins,
-    inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count, ...(stack.enchant ? { enchant: stack.enchant } : {}) })),
+    inventory: world.player.inventory.map((stack) => ({ id: stack.itemId, count: stack.count, ...(stack.enchant ? { enchant: stack.enchant } : {}), ...(stack.mods ? { mods: stack.mods } : {}) })),
     equipment: { ...world.player.equipment },
     enchants: { ...world.player.equipmentEnchant },
+    mods: { ...world.player.equipmentMods },
     skills: [...world.player.skills],
     recipes: [...world.player.recipes],
-    loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, ...(loot.enchant ? { enchant: loot.enchant } : {}), x: loot.pos.x, y: loot.pos.y })),
+    loot: world.loot.map((loot) => ({ id: loot.itemId, count: loot.count, ...(loot.enchant ? { enchant: loot.enchant } : {}), ...(loot.mods ? { mods: loot.mods } : {}), x: loot.pos.x, y: loot.pos.y })),
   };
   return JSON.stringify(data);
 }
@@ -123,15 +126,23 @@ function parseStack(value: unknown, allowCurrency: boolean): ItemStack | null {
   if (!isRecord(value) || !isItemId(value.id) || !isInt(value.count) || value.count < 1) return null;
   const def = ITEMS[value.id];
   if (def.kind === 'currency' ? !allowCurrency : value.count > maxStackOf(value.id)) return null;
-  const { enchant } = value;
-  if (enchant === undefined) return { itemId: value.id, count: value.count };
-  // Only equipment can be enchanted, and only so far.
-  if (def.kind !== 'equipment' || !isInt(enchant) || enchant < 1 || enchant > ENCHANT_MAX) return null;
-  return { itemId: value.id, count: value.count, enchant };
+  const { enchant, mods } = value;
+  const stack: ItemStack = { itemId: value.id, count: value.count };
+  if (enchant !== undefined) {
+    // Only equipment can be enchanted, and only so far.
+    if (def.kind !== 'equipment' || !isInt(enchant) || enchant < 1 || enchant > ENCHANT_MAX) return null;
+    stack.enchant = enchant;
+  }
+  if (mods !== undefined) {
+    // Only equipment has a quality, and only properties it could really have rolled.
+    if (def.kind !== 'equipment' || !validMods(def, mods)) return null;
+    stack.mods = copyMods(mods);
+  }
+  return stack;
 }
 
 function parseCharacter(data: Record<string, unknown>): Character | null {
-  const { race, cls, level, xp, coins, inventory, equipment, enchants, skills, recipes } = data;
+  const { race, cls, level, xp, coins, inventory, equipment, enchants, mods, skills, recipes } = data;
   if (!isRaceId(race) || !isClassId(cls)) return null;
   if (!isInt(level) || level < 1 || level > MAX_LEVEL) return null;
   // Experience at or above the next level's threshold cannot come from normal play.
@@ -144,7 +155,7 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
     if (!stack) return null;
     stacks.push(stack);
   }
-  const worn = newCharacter(STARTING_WEAPON).equipment;
+  const worn: Record<EquipSlot, ItemId | null> = { ...NO_GEAR };
   if (Object.keys(equipment).some((slot) => !EQUIP_SLOTS.includes(slot as EquipSlot))) return null;
   for (const slot of EQUIP_SLOTS) {
     const itemId = equipment[slot];
@@ -161,12 +172,23 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
     worn[slot] = itemId;
   }
   if (!isRecord(enchants) || Object.keys(enchants).some((slot) => !EQUIP_SLOTS.includes(slot as EquipSlot))) return null;
-  const equipmentEnchant = { weapon: 0, helmet: 0, armor: 0, boots: 0 };
+  const equipmentEnchant: Record<EquipSlot, number> = { ...NO_ENCHANT };
   for (const slot of EQUIP_SLOTS) {
     const value = enchants[slot];
     // An empty slot cannot be enchanted.
     if (!isInt(value) || value < 0 || value > ENCHANT_MAX || (value > 0 && worn[slot] === null)) return null;
     equipmentEnchant[slot] = value;
+  }
+  if (!isRecord(mods) || Object.keys(mods).some((slot) => !EQUIP_SLOTS.includes(slot as EquipSlot))) return null;
+  const equipmentMods: Record<EquipSlot, ItemMods | null> = { ...NO_GEAR };
+  for (const slot of EQUIP_SLOTS) {
+    const value = mods[slot];
+    if (value === null) continue;
+    const itemId = worn[slot];
+    const def = itemId ? ITEMS[itemId] : null;
+    // An empty slot has no properties, and a worn item only ones it could have rolled.
+    if (!def || def.kind !== 'equipment' || !validMods(def, value)) return null;
+    equipmentMods[slot] = copyMods(value) ?? null;
   }
   // A skill can only have been learned once, and not before its level.
   if (!Array.isArray(skills) || new Set(skills).size !== skills.length) return null;
@@ -174,7 +196,7 @@ function parseCharacter(data: Record<string, unknown>): Character | null {
   // Only recipes that have to be learned can be in the list, each once.
   if (!Array.isArray(recipes) || new Set(recipes).size !== recipes.length) return null;
   if (!recipes.every((id) => isRecipeId(id) && RECIPES[id].mustLearn)) return null;
-  return { race, cls, level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, skills: skills as SkillId[], recipes: recipes as RecipeId[] };
+  return { race, cls, level, xp, coins, inventory: stacks, equipment: worn, equipmentEnchant, equipmentMods, skills: skills as SkillId[], recipes: recipes as RecipeId[] };
 }
 
 /** Saved data can be edited or corrupted, so every field is checked. */
@@ -221,7 +243,7 @@ export function parseSave(raw: string | null, dev = false): LoadResult {
       if (!stack || !isRecord(entry) || !isFiniteNumber(entry.x) || !isFiniteNumber(entry.y)) return { status: 'damaged' };
       const pos = { x: entry.x, y: entry.y };
       if (!circleFree(world.map, pos, PLAYER_RADIUS)) return { status: 'damaged' };
-      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ignored: false, ...(stack.enchant ? { enchant: stack.enchant } : {}) });
+      world.loot.push({ id: world.nextLootId, itemId: stack.itemId, count: stack.count, pos, ignored: false, ...(stack.enchant ? { enchant: stack.enchant } : {}), ...(stack.mods ? { mods: stack.mods } : {}) });
       world.nextLootId += 1;
     }
 

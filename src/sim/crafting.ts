@@ -1,5 +1,6 @@
 import { addItem, canFit, countItem, removeItem } from './inventory';
 import { type ItemId, ITEMS } from './items';
+import { rollMods } from './mods';
 import { isNear } from './npcs';
 import { createRng } from './rng';
 import type { World } from './world';
@@ -88,8 +89,11 @@ export function craft(world: World, id: RecipeId): void {
   for (const input of inputs) removeItem(player, input.itemId, input.count);
   const rng = createRng(world.rngState);
   const success = rng.int(1, 100) <= chance;
+  // Made equipment gets a quality and properties of its own, like a found one.
+  const def = ITEMS[output.itemId];
+  const mods = success && def.kind === 'equipment' ? rollMods(rng, def) : undefined;
   world.rngState = rng.state;
   if (!success) return void world.events.push({ type: 'craftFailed', recipe: id });
-  addItem(player, output.itemId, output.count);
-  world.events.push({ type: 'crafted', recipe: id, itemId: output.itemId, count: output.count });
+  addItem(player, output.itemId, output.count, 0, mods);
+  world.events.push({ type: 'crafted', recipe: id, itemId: output.itemId, count: output.count, ...(mods ? { quality: mods.quality } : {}) });
 }

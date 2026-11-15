@@ -1,10 +1,12 @@
-import { INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
+import { CRIT_BASE, CRIT_MAX, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_COOLDOWN_MIN, INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
 import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { ENCHANT_ARMOR_BONUS, ENCHANT_WEAPON_BONUS } from './balance';
-import { type EquipSlot, type ItemDef, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, maxStackOf } from './items';
+import { type EquipSlot, type ItemDef, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, JEWELLERY_SLOTS, maxStackOf } from './items';
 import { type ClassId, type RaceId, type WeaponType, CLASSES } from './classes';
 import { type RecipeId, learnRecipe } from './crafting';
+import { type ItemMods, type StatId, QUALITY, copyMods } from './mods';
+import { heroMaxHp, heroMaxMp } from './progression';
 import type { SkillId } from './skills';
 import type { Player, World } from './world';
 
@@ -13,7 +15,20 @@ export interface ItemStack {
   count: number;
   /** Enchantment level of a piece of equipment; left out when it is zero. */
   enchant?: number;
+  /** Quality and random properties of a piece of equipment; left out for a plain one. */
+  mods?: ItemMods;
 }
+
+/** One piece of equipment as a bag stack, leaving out whatever it does not have. */
+export function gearStack(itemId: ItemId, enchant = 0, mods?: ItemMods | null): ItemStack {
+  const stack: ItemStack = { itemId, count: 1 };
+  if (enchant > 0) stack.enchant = enchant;
+  if (mods) stack.mods = mods;
+  return stack;
+}
+
+export const NO_GEAR: Readonly<Record<EquipSlot, null>> = { weapon: null, helmet: null, armor: null, gloves: null, boots: null, ring: null, amulet: null };
+export const NO_ENCHANT: Readonly<Record<EquipSlot, number>> = { weapon: 0, helmet: 0, armor: 0, gloves: 0, boots: 0, ring: 0, amulet: 0 };
 
 /** Everything the hero keeps when moving on to another dungeon. */
 export interface Character {
@@ -25,9 +40,12 @@ export interface Character {
   xp: number;
   coins: number;
   inventory: ItemStack[];
-  equipment: Record<EquipSlot, ItemId | null>;
-  /** Enchantment level of each worn item; all zero when left out. */
-  equipmentEnchant?: Record<EquipSlot, number>;
+  /** Slots left out are empty. */
+  equipment: Partial<Record<EquipSlot, ItemId | null>>;
+  /** Enchantment level of each worn item; zero when left out. */
+  equipmentEnchant?: Partial<Record<EquipSlot, number>>;
+  /** Quality and properties of each worn item; plain when left out. */
+  equipmentMods?: Partial<Record<EquipSlot, ItemMods | null>>;
   /** Skills learned from the trainer; none when left out. */
   skills?: SkillId[];
   /** Recipes learned from recipe items; none when left out. */
@@ -48,16 +66,17 @@ export function newHero(race: RaceId, cls: ClassId): Character {
 }
 
 export function newCharacter(startingWeapon: ItemId): Character {
-  return { level: 1, xp: 0, coins: 0, inventory: [], equipment: { weapon: startingWeapon, helmet: null, armor: null, boots: null } };
+  return { level: 1, xp: 0, coins: 0, inventory: [], equipment: { ...NO_GEAR, weapon: startingWeapon } };
 }
 
 export function characterOf(world: World): Character {
-  const { race, cls, level, xp, coins, inventory, equipment, equipmentEnchant, skills, recipes } = world.player;
+  const { race, cls, level, xp, coins, inventory, equipment, equipmentEnchant, equipmentMods, skills, recipes } = world.player;
   return {
     race, cls, level, xp, coins,
     inventory: inventory.map((stack) => ({ ...stack })),
     equipment: { ...equipment },
     equipmentEnchant: { ...equipmentEnchant },
+    equipmentMods: { ...equipmentMods },
     skills: [...skills],
     recipes: [...recipes],
   };
@@ -72,8 +91,52 @@ export function playerDamage(player: Player): readonly [number, number] {
   const weapon = player.equipment.weapon;
   const def = weapon ? ITEMS[weapon] : null;
   if (!def || def.kind !== 'equipment' || def.slot !== 'weapon') return UNARMED_DAMAGE;
-  const bonus = enchantBonus(def, player.equipmentEnchant.weapon);
-  return [def.damage[0] + bonus, def.damage[1] + bonus];
+  return weaponDamage(def, player.equipmentEnchant.weapon, player.equipmentMods.weapon);
+}
+
+/** Damage of one weapon: its own, raised by its quality, plus its enchantment. */
+export function weaponDamage(def: Extract<ItemDef, { slot: 'weapon' }>, enchant: number, mods?: ItemMods | null): readonly [number, number] {
+  const quality = 1 + (mods ? QUALITY[mods.quality].damage : 0);
+  const bonus = enchantBonus(def, enchant);
+  return [Math.round(def.damage[0] * quality) + bonus, Math.round(def.damage[1] * quality) + bonus];
+}
+
+/** Defence of one piece of armour, not counting its random properties. */
+export function armorDefense(def: Extract<ItemDef, { kind: 'equipment' }>, enchant: number, mods?: ItemMods | null): number {
+  if (def.slot === 'weapon') return 0;
+  // Quality hardens armour; jewellery has nothing to harden.
+  const quality = mods && !JEWELLERY_SLOTS.includes(def.slot) ? QUALITY[mods.quality].defense : 0;
+  return def.defense + quality + enchantBonus(def, enchant);
+}
+
+/** What all the worn items' random properties add up to. */
+export function gearStats(player: Player): Record<StatId, number> {
+  const total: Record<StatId, number> = { hp: 0, mp: 0, power: 0, defense: 0, crit: 0, haste: 0, speed: 0 };
+  for (const slot of EQUIP_SLOTS) {
+    const mods = player.equipment[slot] ? player.equipmentMods[slot] : null;
+    if (mods) for (const affix of mods.affixes) total[affix.stat] += affix.value;
+  }
+  return total;
+}
+
+/** Chance of a critical blow, in percent. */
+export function critChance(player: Player): number {
+  return Math.min(CRIT_MAX, CRIT_BASE + gearStats(player).crit);
+}
+
+/** Ticks between two attacks: gear that quickens the hand shortens it. */
+export function attackCooldown(player: Player): number {
+  return Math.max(PLAYER_ATTACK_COOLDOWN_MIN, Math.round(PLAYER_ATTACK_COOLDOWN / (1 + gearStats(player).haste / 100)));
+}
+
+/** Recomputes maximum health and mana from level and gear; call after either changes. */
+export function refreshVitals(player: Player): void {
+  const gear = gearStats(player);
+  player.maxHp = heroMaxHp(player.level, player.race, player.cls) + gear.hp;
+  player.maxMp = heroMaxMp(player.level, player.race, player.cls) + gear.mp;
+  // A dead hero stays dead; a living one never drops to zero by taking a ring off.
+  if (player.hp > 0) player.hp = Math.max(1, Math.min(player.hp, player.maxHp));
+  player.mp = Math.min(player.mp, player.maxMp);
 }
 
 /** The kind of weapon in the hero's hand, or null when unarmed. */
@@ -84,11 +147,11 @@ export function weaponInHand(player: Player): WeaponType | null {
 }
 
 export function playerDefense(player: Player): number {
-  let total = 0;
+  let total = gearStats(player).defense;
   for (const slot of EQUIP_SLOTS) {
     const itemId = player.equipment[slot];
     const def = itemId ? ITEMS[itemId] : null;
-    if (def && def.kind === 'equipment' && def.slot !== 'weapon') total += def.defense + enchantBonus(def, player.equipmentEnchant[slot]);
+    if (def && def.kind === 'equipment') total += armorDefense(def, player.equipmentEnchant[slot], player.equipmentMods[slot]);
   }
   return total;
 }
@@ -96,9 +159,9 @@ export function playerDefense(player: Player): number {
 /**
  * Adds items to the purse or the inventory. Returns how many did not fit.
  * Materials fill existing stacks first, then free slots.
- * `enchant` is the enchantment level of a piece of equipment.
+ * `enchant` and `mods` are the enchantment level and properties of a piece of equipment.
  */
-export function addItem(player: Player, itemId: ItemId, count: number, enchant = 0): number {
+export function addItem(player: Player, itemId: ItemId, count: number, enchant = 0, mods?: ItemMods | null): number {
   const def = ITEMS[itemId];
   let left = count;
   if (def.kind === 'currency') {
@@ -117,7 +180,7 @@ export function addItem(player: Player, itemId: ItemId, count: number, enchant =
     }
     while (left > 0 && player.inventory.length < INVENTORY_SLOTS) {
       const moved = Math.min(left, maxStack);
-      player.inventory.push(enchant > 0 ? { itemId, count: moved, enchant } : { itemId, count: moved });
+      player.inventory.push(maxStack === 1 ? gearStack(itemId, enchant, copyMods(mods)) : { itemId, count: moved });
       left -= moved;
     }
   }
@@ -218,10 +281,10 @@ export function useItem(world: World, itemId: ItemId): void {
 }
 
 /** Puts an item on the floor. `ignored` keeps the hero from picking it right back up. */
-export function dropLoot(world: World, itemId: ItemId, count: number, at: Point, ignored = false, enchant = 0): void {
+export function dropLoot(world: World, itemId: ItemId, count: number, at: Point, ignored = false, enchant = 0, mods?: ItemMods | null): void {
   const id = world.nextLootId;
   world.nextLootId += 1;
-  world.loot.push({ id, itemId, count, pos: pushOutOfWalls(world.map, at, PLAYER_RADIUS), ignored, ...(enchant > 0 ? { enchant } : {}) });
+  world.loot.push({ id, itemId, count, pos: pushOutOfWalls(world.map, at, PLAYER_RADIUS), ignored, ...(enchant > 0 ? { enchant } : {}), ...(mods ? { mods } : {}) });
   world.events.push({ type: 'lootDropped', id });
 }
 
@@ -236,8 +299,10 @@ export function pickUpLoot(world: World): void {
       continue;
     }
     if (loot.ignored) continue;
-    const left = addItem(player, loot.itemId, loot.count, loot.enchant ?? 0);
-    if (left < loot.count) world.events.push({ type: 'itemPicked', itemId: loot.itemId, count: loot.count - left });
+    const left = addItem(player, loot.itemId, loot.count, loot.enchant ?? 0, loot.mods);
+    if (left < loot.count) {
+      world.events.push({ type: 'itemPicked', itemId: loot.itemId, count: loot.count - left, ...(loot.mods ? { quality: loot.mods.quality } : {}) });
+    }
     loot.count = left;
     if (left > 0) {
       // No room: leave it and say so once, not on every tick the hero stands here.
@@ -263,10 +328,13 @@ export function equipFromInventory(world: World, index: number): void {
   }
   const previous = player.equipment[def.slot];
   const previousEnchant = player.equipmentEnchant[def.slot];
+  const previousMods = player.equipmentMods[def.slot];
   player.equipment[def.slot] = stack.itemId;
   player.equipmentEnchant[def.slot] = stack.enchant ?? 0;
-  if (previous) player.inventory[index] = previousEnchant > 0 ? { itemId: previous, count: 1, enchant: previousEnchant } : { itemId: previous, count: 1 };
+  player.equipmentMods[def.slot] = stack.mods ?? null;
+  if (previous) player.inventory[index] = gearStack(previous, previousEnchant, previousMods);
   else player.inventory.splice(index, 1);
+  refreshVitals(player);
   player.revision += 1;
 }
 
@@ -279,10 +347,11 @@ export function unequip(world: World, slot: EquipSlot): void {
     world.events.push({ type: 'inventoryFull' });
     return;
   }
-  const enchant = player.equipmentEnchant[slot];
+  player.inventory.push(gearStack(itemId, player.equipmentEnchant[slot], player.equipmentMods[slot]));
   player.equipment[slot] = null;
   player.equipmentEnchant[slot] = 0;
-  player.inventory.push(enchant > 0 ? { itemId, count: 1, enchant } : { itemId, count: 1 });
+  player.equipmentMods[slot] = null;
+  refreshVitals(player);
   player.revision += 1;
 }
 
@@ -293,5 +362,5 @@ export function dropFromInventory(world: World, index: number): void {
   if (!stack) return;
   player.inventory.splice(index, 1);
   player.revision += 1;
-  dropLoot(world, stack.itemId, stack.count, player.pos, true, stack.enchant ?? 0);
+  dropLoot(world, stack.itemId, stack.count, player.pos, true, stack.enchant ?? 0, stack.mods);
 }

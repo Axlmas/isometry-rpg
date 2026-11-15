@@ -74,7 +74,9 @@ export class Hud {
     badge.textContent = i18n.t('hud.levelShort', { level });
     badge.setAttribute('aria-label', i18n.t('hud.level', { level }));
     const spoken = needed > 0 ? i18n.t('hud.xp', { current: xp, needed }) : i18n.t('hud.xpMax');
-    this.setBar('xp', xp, needed, spoken, needed > 0 ? i18n.t('hud.bar', { current: xp, max: needed }) : i18n.t('hud.xpMax'));
+    // Shown to the hundredth of a percent: on a long level, every kill should still move the number.
+    const percent = needed > 0 ? ((xp / needed) * 100).toFixed(2) : '';
+    this.setBar('xp', xp, needed, spoken, needed > 0 ? i18n.t('hud.xpPercent', { percent }) : i18n.t('hud.xpMax'));
   }
 
   /** Opens the help window, for a player who has just made a hero. */

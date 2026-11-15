@@ -1,11 +1,11 @@
 import {
-  CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
+  CHARGE_DAMAGE_MULTIPLIER, PLAYER_ATTACK_ARC, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, PLAYER_MP_REGEN_INTERVAL,
   PLAYER_RADIUS, PLAYER_REGEN_DELAY, PLAYER_REGEN_INTERVAL, PLAYER_SPEED, SAFE_REGEN_INTERVAL, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
-import { dropFromInventory, equipFromInventory, pickUpLoot, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
+import { attackCooldown, dropFromInventory, equipFromInventory, gearStats, pickUpLoot, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
 import { fire, updateProjectiles } from './projectiles';
 import { CLASSES, RACES } from './classes';
 import { craft } from './crafting';
@@ -93,7 +93,7 @@ function applyCommand(world: World, command: Command): void {
       const dir = normalize(command.dx, command.dy);
       if (dir === null || player.attackCooldown > 0) return;
       player.facing = dir;
-      player.attackCooldown = PLAYER_ATTACK_COOLDOWN;
+      player.attackCooldown = attackCooldown(player);
       const charged = spendCharge(world);
       // A bow or a staff looses a missile; a sword, or a bare fist, swings.
       const ranged = weaponInHand(player) === 'bow' || weaponInHand(player) === 'staff';
@@ -158,7 +158,7 @@ function movePlayer(world: World): void {
   const { player, map } = world;
   const before = { ...player.pos };
   const haste = player.hasteTicks > 0 ? player.hasteFactor : 1;
-  let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * TICK_MS) / 1000;
+  let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * (1 + gearStats(player).speed / 100) * TICK_MS) / 1000;
 
   if (player.moveDir.x !== 0 || player.moveDir.y !== 0) {
     player.pos = pushOutOfWalls(

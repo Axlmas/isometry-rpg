@@ -1,15 +1,17 @@
 import {
+  CRIT_MULTIPLIER, ELDER, ELDER_CHANCE, MONSTER_LINK_RANGE,
   MONSTER_AGGRO_RANGE, MONSTER_ATTACK_COOLDOWN, MONSTER_ATTACK_REACH, MONSTER_ATTACK_START,
   MONSTER_ATTACK_WINDUP, MONSTER_DAMAGE, MONSTER_KNOCKBACK, MONSTER_RADIUS, MONSTER_REPATH_INTERVAL,
   MONSTER_KINDS, MONSTER_LEASH, MONSTER_RESPAWN_CLEARANCE, MONSTER_RESPAWN_TIME, MIN_DAMAGE_TAKEN, PLAYER_RADIUS, TICK_MS,
 } from './balance';
 import { clearLine, pushOutOfWalls } from './collision';
 import type { Point } from './grid';
-import { dropLoot, playerDamage, playerDefense } from './inventory';
-import { DROP_TABLES } from './items';
+import { critChance, dropLoot, gearStats, playerDamage, playerDefense } from './inventory';
+import { DROP_TABLES, ITEMS } from './items';
+import { rollMods } from './mods';
 import { guardDuty } from './npcs';
 import { findPath } from './pathfinding';
-import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterXp } from './progression';
+import { applyDeathPenalty, damageBonusAtLevel, grantXp, monsterDamageBonus, monsterMaxHp, monsterXp } from './progression';
 import { createRng } from './rng';
 import type { Monster, PendingAttack, World } from './world';
 import { regionAt } from './zones';
@@ -29,16 +31,26 @@ function pick<T>(world: World, options: readonly T[]): T {
 /** Rolls what a dead monster leaves behind, by its kind's drop table, and puts it on the floor. */
 function dropMonsterLoot(world: World, monster: Monster): void {
   const table = DROP_TABLES[monster.kind];
-  dropLoot(world, 'coins', roll(world, table.coins), monster.pos);
-  // One roll decides which line of the table comes up, if any.
-  let chance = roll(world, [1, 100]);
-  for (const entry of table.drops) {
-    if (chance <= entry.chance) {
-      // Placed slightly apart from the coins so both drops are visible.
-      dropLoot(world, pick(world, entry.items), roll(world, entry.count), { x: monster.pos.x + 0.35, y: monster.pos.y + 0.1 });
-      return;
+  dropLoot(world, 'coins', roll(world, table.coins) * (monster.elder ? ELDER.coins : 1), monster.pos);
+  // An elder rolls the table more than once.
+  for (let i = 0; i < (monster.elder ? ELDER.drops : 1); i++) {
+    // One roll decides which line of the table comes up, if any.
+    let chance = roll(world, [1, 100]);
+    for (const entry of table.drops) {
+      if (chance <= entry.chance) {
+        const itemId = pick(world, entry.items);
+        const count = roll(world, entry.count);
+        const def = ITEMS[itemId];
+        // Every dropped piece of equipment is its own: quality and properties are rolled here.
+        const rng = createRng(world.rngState);
+        const mods = def.kind === 'equipment' ? rollMods(rng, def, monster.elder) : undefined;
+        world.rngState = rng.state;
+        // Placed slightly apart from the coins so every drop is visible.
+        dropLoot(world, itemId, count, { x: monster.pos.x + 0.35 - i * 0.7, y: monster.pos.y + 0.1 }, false, 0, mods);
+        break;
+      }
+      chance -= entry.chance;
     }
-    chance -= entry.chance;
   }
 }
 
@@ -54,29 +66,33 @@ export function buryTheDead(world: World): void {
 
 /**
  * The hero damages one monster: rolls the weapon's damage, applies the
- * multiplier, pushes the monster along `push` and interrupts its attack.
+ * multiplier and pushes the monster along `push`; a critical blow also interrupts its attack.
  * Returns the experience earned (zero unless it died). The caller removes
  * the dead and grants the experience once all hits of the tick are done.
  */
 export function hitMonster(world: World, monster: Monster, multiplier: number, push: Point): number {
   const { player, map } = world;
-  const damage = Math.max(1, Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * multiplier));
+  const crit = roll(world, [1, 100]) <= critChance(player);
+  const power = (1 + gearStats(player).power / 100) * (crit ? CRIT_MULTIPLIER : 1);
+  const damage = Math.max(1, Math.round(roll(world, playerDamage(player)) * damageBonusAtLevel(player.level) * multiplier * power));
   monster.hp = Math.max(0, monster.hp - damage);
   monster.aggro = true;
   monster.returning = false;
-  monster.windup = 0; // A hit interrupts the monster's own attack.
+  // Only a critical blow staggers a monster out of its own attack, and an elder not even then.
+  if (crit && !monster.elder) monster.windup = 0;
   const length = Math.hypot(push.x, push.y);
-  if (length > 0) {
+  // A monster that has begun its blow stands its ground.
+  if (length > 0 && monster.windup === 0 && !monster.elder) {
     monster.pos = pushOutOfWalls(
       map,
       { x: monster.pos.x + (push.x / length) * MONSTER_KNOCKBACK, y: monster.pos.y + (push.y / length) * MONSTER_KNOCKBACK },
       MONSTER_RADIUS,
     );
   }
-  world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0 });
+  world.events.push({ type: 'monsterHit', id: monster.id, damage, pos: { ...monster.pos }, died: monster.hp === 0, crit });
   if (monster.hp > 0) return 0;
   dropMonsterLoot(world, monster);
-  return monsterXp(monster.level, monster.kind);
+  return monsterXp(monster.level, monster.kind, monster.elder);
 }
 
 /**
@@ -188,9 +204,27 @@ function walkTowards(world: World, monster: Monster, target: Point, stopAt: numb
 /** Makes a monster forget the hero and head home. */
 function giveUp(monster: Monster): void {
   monster.aggro = false;
+  monster.called = false;
   monster.returning = true;
   monster.windup = 0;
   monster.waypoint = null;
+}
+
+/**
+ * A monster that has just noticed the hero (or been hit) raises the alarm:
+ * its pack and every monster close by join in. Those who answer do not call
+ * further, so one careless step brings a pack or two, not the whole field.
+ */
+function raiseAlarm(world: World, caller: Monster): void {
+  caller.called = true;
+  for (const other of world.monsters) {
+    if (other === caller || other.aggro || other.returning || other.hp <= 0) continue;
+    const samePack = caller.pack >= 0 && other.pack === caller.pack;
+    const close = Math.hypot(other.pos.x - caller.pos.x, other.pos.y - caller.pos.y) <= MONSTER_LINK_RANGE;
+    if (!close && !(samePack && Math.hypot(other.pos.x - caller.pos.x, other.pos.y - caller.pos.y) <= MONSTER_LINK_RANGE * 3)) continue;
+    other.aggro = true;
+    other.called = true;
+  }
 }
 
 /** Keeps monsters from standing inside each other or inside the hero. */
@@ -238,10 +272,16 @@ function respawnMonsters(world: World): void {
       waiting.push(entry);
       continue;
     }
+    // Each time a monster comes back, it may come back as an elder.
+    const elder = roll(world, [1, 100]) <= ELDER_CHANCE;
+    const maxHp = monsterMaxHp(monster.level, monster.kind, elder);
     world.monsters.push({
       ...monster,
+      elder,
+      maxHp,
       pos: { ...monster.home },
-      hp: monster.maxHp,
+      hp: maxHp,
+      called: false,
       aggro: false,
       returning: false,
       windup: 0,
@@ -285,6 +325,7 @@ export function updateMonsters(world: World): void {
     const distance = Math.hypot(player.pos.x - monster.pos.x, player.pos.y - monster.pos.y);
     if (!monster.aggro && distance <= MONSTER_AGGRO_RANGE) monster.aggro = true;
     if (!monster.aggro) continue;
+    if (!monster.called) raiseAlarm(world, monster);
     // The leash only matters in the open world; in a dungeon there is nowhere to run.
     if (world.zone === 'overworld' && Math.hypot(monster.home.x - monster.pos.x, monster.home.y - monster.pos.y) > MONSTER_LEASH) {
       giveUp(monster);
@@ -296,7 +337,7 @@ export function updateMonsters(world: World): void {
       monster.windup -= 1;
       if (monster.windup === 0) {
         monster.cooldown = MONSTER_ATTACK_COOLDOWN;
-        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(monster.level, monster.kind)));
+        if (distance <= MONSTER_ATTACK_REACH) hurtPlayer(world, Math.round(roll(world, MONSTER_DAMAGE) * monsterDamageBonus(monster.level, monster.kind, monster.elder)));
       }
     } else if (distance <= MONSTER_ATTACK_START && monster.cooldown === 0) {
       monster.windup = MONSTER_ATTACK_WINDUP;
@@ -317,6 +358,7 @@ export function resetMonsters(world: World): void {
     monster.pos = { ...monster.home };
     monster.hp = monster.maxHp;
     monster.aggro = false;
+    monster.called = false;
     monster.returning = false;
     monster.windup = 0;
     monster.cooldown = 0;

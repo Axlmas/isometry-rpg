@@ -10,8 +10,10 @@ import type { RecipeId } from './crafting';
 export type Grade = 'none' | 'd';
 export const GRADES: readonly Grade[] = ['none', 'd'];
 
-export type EquipSlot = 'weapon' | 'helmet' | 'armor' | 'boots';
-export const EQUIP_SLOTS: readonly EquipSlot[] = ['weapon', 'helmet', 'armor', 'boots'];
+export type EquipSlot = 'weapon' | 'helmet' | 'armor' | 'gloves' | 'boots' | 'ring' | 'amulet';
+export const EQUIP_SLOTS: readonly EquipSlot[] = ['weapon', 'helmet', 'armor', 'gloves', 'boots', 'ring', 'amulet'];
+/** Jewellery has no defence of its own: all its worth is in its random properties. */
+export const JEWELLERY_SLOTS: readonly EquipSlot[] = ['ring', 'amulet'];
 
 export type ItemId =
   | 'coins'
@@ -22,6 +24,8 @@ export type ItemId =
   | 'leatherCap' | 'ironHelm'
   | 'leatherJerkin' | 'chainShirt'
   | 'leatherBoots' | 'ironGreaves'
+  | 'leatherGloves' | 'ironGauntlets'
+  | 'copperRing' | 'silverRing' | 'boneAmulet' | 'silverAmulet'
   | 'healthPotion' | 'manaPotion' | 'chargePlain' | 'chargeD'
   | 'crystalD'
   | 'scrollWeaponPlain' | 'scrollArmorPlain' | 'scrollWeaponD' | 'scrollArmorD'
@@ -82,6 +86,15 @@ export const ITEMS: Readonly<Record<ItemId, ItemDef>> = {
   chainShirt: { id: 'chainShirt', kind: 'equipment', slot: 'armor', grade: 'd', defense: 3, price: 680 },
 
   leatherBoots: { id: 'leatherBoots', kind: 'equipment', slot: 'boots', grade: 'none', defense: 1, price: 70 },
+
+  leatherGloves: { id: 'leatherGloves', kind: 'equipment', slot: 'gloves', grade: 'none', defense: 1, price: 60 },
+  ironGauntlets: { id: 'ironGauntlets', kind: 'equipment', slot: 'gloves', grade: 'd', defense: 2, price: 400 },
+
+  // Jewellery: never sold, only found. It always carries at least one random property.
+  copperRing: { id: 'copperRing', kind: 'equipment', slot: 'ring', grade: 'none', defense: 0, price: 90 },
+  silverRing: { id: 'silverRing', kind: 'equipment', slot: 'ring', grade: 'd', defense: 0, price: 480 },
+  boneAmulet: { id: 'boneAmulet', kind: 'equipment', slot: 'amulet', grade: 'none', defense: 0, price: 90 },
+  silverAmulet: { id: 'silverAmulet', kind: 'equipment', slot: 'amulet', grade: 'd', defense: 0, price: 480 },
   healthPotion: { id: 'healthPotion', kind: 'consumable', maxStack: POTION_STACK, price: 25, effect: { kind: 'heal', amount: 60 } },
   manaPotion: { id: 'manaPotion', kind: 'consumable', maxStack: POTION_STACK, price: 30, effect: { kind: 'mana', amount: 40 } },
   chargePlain: { id: 'chargePlain', kind: 'consumable', maxStack: CHARGE_STACK, price: 1, effect: { kind: 'charge', grade: 'none' } },
@@ -173,7 +186,8 @@ export const DROP_TABLES: Readonly<Record<MonsterKind, DropTable>> = {
       { chance: 42, items: ['leather', 'bone'], count: [1, 2] },
       { chance: 12, items: ['thread'], count: [1, 2] },
       { chance: 5, items: POTIONS, count: one },
-      { chance: 3, items: ['leatherCap', 'leatherBoots'], count: one },
+      { chance: 3, items: ['leatherCap', 'leatherBoots', 'leatherGloves'], count: one },
+      { chance: 2, items: ['copperRing', 'boneAmulet'], count: one },
     ],
   },
   boar: {
@@ -207,9 +221,12 @@ export function buyPrice(itemId: ItemId): number {
   return def.kind === 'currency' ? 0 : def.price;
 }
 
-/** The merchant pays half the price, rounded down; things worth 1 coin sell for nothing. */
-export function sellPrice(itemId: ItemId): number {
-  return Math.floor(buyPrice(itemId) / 2);
+/**
+ * The merchant pays half the price, rounded down; things worth 1 coin sell for nothing.
+ * `worth` is the multiplier of a piece of equipment's quality (see mods.ts).
+ */
+export function sellPrice(itemId: ItemId, worth = 1): number {
+  return Math.floor((buyPrice(itemId) * worth) / 2);
 }
 
 export function maxStackOf(itemId: ItemId): number {

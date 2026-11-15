@@ -1,5 +1,5 @@
 import { ENCHANT_CHANCE, ENCHANT_MAX, ENCHANT_SAFE } from './balance';
-import { addItem, canFit } from './inventory';
+import { type ItemStack, addItem, canFit, refreshVitals } from './inventory';
 import { type EquipSlot, type ItemDef, type ItemId, EQUIP_SLOTS, ITEMS, crystalsFor } from './items';
 import { isNear } from './npcs';
 import { createRng } from './rng';
@@ -44,6 +44,8 @@ function removeTarget(world: World, target: ItemTarget): void {
   if (target.kind === 'slot') {
     player.equipment[target.slot] = null;
     player.equipmentEnchant[target.slot] = 0;
+    player.equipmentMods[target.slot] = null;
+    refreshVitals(player);
   } else {
     player.inventory.splice(target.index, 1);
   }
@@ -101,10 +103,10 @@ export function crystallize(world: World, index: number): void {
   const deny = (reason: 'far' | 'noCrystals' | 'full') => void world.events.push({ type: 'crystallizeDenied', reason });
   if (!isNear(world, 'blacksmith')) return deny('far');
   if (crystals <= 0) return deny('noCrystals');
-  player.inventory.splice(index, 1);
+  const [taken] = player.inventory.splice(index, 1) as [ItemStack];
   if (!canFit(player, 'crystalD', crystals)) {
     // Put the item back exactly where it was.
-    player.inventory.splice(index, 0, { itemId: item.itemId, count: 1, ...(item.level > 0 ? { enchant: item.level } : {}) });
+    player.inventory.splice(index, 0, taken);
     return deny('full');
   }
   addItem(player, 'crystalD', crystals);

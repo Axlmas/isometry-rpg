@@ -1,5 +1,5 @@
 import {
-  DUNGEON_SIZE, HOLLOW_MONSTERS, MINES_MIN_LEVEL, MONSTER_COUNT, MONSTER_MIN_SPAWN_DISTANCE, MOOR_MONSTERS,
+  DUNGEON_SIZE, ELDER_CHANCE, HOLLOW_MONSTERS, PACK_RADIUS, MINES_MIN_LEVEL, MONSTER_COUNT, MONSTER_MIN_SPAWN_DISTANCE, MOOR_MONSTERS,
   type MonsterKind, PILLAR_CHANCE, WORLD_HEIGHT, WORLD_TREE_CHANCE, WORLD_WIDTH,
 } from './balance';
 import { type GridMap, type Point, type Tile, TILE_FLOOR, TILE_WALL, isWalkable } from './grid';
@@ -27,13 +27,15 @@ export interface Region {
   /** Lowest and highest level of the monsters that live here; null where it depends on the hero. */
   levels: readonly [number, number] | null;
   monsterKind: MonsterKind | null;
+  /** How many of them live together. */
+  pack: number;
 }
 
 export const REGIONS: Readonly<Record<RegionId, Region>> = {
-  village: { id: 'village', safe: true, levels: null, monsterKind: null },
-  moor: { id: 'moor', safe: false, levels: [1, 2], monsterKind: 'wolf' },
-  hollow: { id: 'hollow', safe: false, levels: [3, 5], monsterKind: 'boar' },
-  mines: { id: 'mines', safe: false, levels: null, monsterKind: 'grunt' },
+  village: { id: 'village', safe: true, levels: null, monsterKind: null, pack: 0 },
+  moor: { id: 'moor', safe: false, levels: [1, 2], monsterKind: 'wolf', pack: 3 },
+  hollow: { id: 'hollow', safe: false, levels: [3, 5], monsterKind: 'boar', pack: 2 },
+  mines: { id: 'mines', safe: false, levels: null, monsterKind: 'grunt', pack: 1 },
 };
 
 /** A place where the hero can leave for the other map. */
@@ -49,6 +51,9 @@ export interface MonsterSpot {
   kind: MonsterKind;
   /** Null means "the level of the dungeon". */
   level: number | null;
+  elder: boolean;
+  /** Pack number, or -1 for a loner. */
+  pack: number;
 }
 
 export interface ZoneLayout {
@@ -181,6 +186,7 @@ function buildOverworld(rng: Rng): ZoneLayout {
   sealUnreachable(map, spawn);
 
   const monsters: MonsterSpot[] = [];
+  let pack = 0;
   for (const [region, count] of [[REGIONS.moor, MOOR_MONSTERS], [REGIONS.hollow, HOLLOW_MONSTERS]] as const) {
     const candidates: Point[] = [];
     for (let y = 1; y < height - 1; y++) {
@@ -192,8 +198,22 @@ function buildOverworld(rng: Rng): ZoneLayout {
       }
     }
     const [min, max] = region.levels as readonly [number, number];
-    for (const home of pickSpots(candidates, count, rng)) {
-      monsters.push({ home, kind: region.monsterKind as MonsterKind, level: rng.int(min, max) });
+    // Beasts keep to packs: a centre is picked, and the rest of the pack settles around it.
+    let placed = 0;
+    while (placed < count && candidates.length > 0) {
+      const [centre] = pickSpots(candidates, 1, rng) as [Point];
+      const members = [centre];
+      for (let i = candidates.length - 1; i >= 0 && members.length < region.pack; i--) {
+        const spot = candidates[i] as Point;
+        if (Math.hypot(spot.x - centre.x, spot.y - centre.y) <= PACK_RADIUS) members.push(...(candidates.splice(i, 1) as [Point]));
+      }
+      const level = rng.int(min, max);
+      for (const home of members) {
+        if (placed >= count) break;
+        monsters.push({ home, kind: region.monsterKind as MonsterKind, level, elder: rng.int(1, 100) <= ELDER_CHANCE, pack });
+        placed += 1;
+      }
+      pack += 1;
     }
   }
 
@@ -219,7 +239,7 @@ function buildDungeon(rng: Rng): ZoneLayout {
       if (isWalkable(map, x, y) && Math.hypot(x - spawn.x, y - spawn.y) >= MONSTER_MIN_SPAWN_DISTANCE) candidates.push({ x, y });
     }
   }
-  const monsters = pickSpots(candidates, MONSTER_COUNT, rng).map((home): MonsterSpot => ({ home, kind: 'grunt', level: null }));
+  const monsters = pickSpots(candidates, MONSTER_COUNT, rng).map((home): MonsterSpot => ({ home, kind: 'grunt', level: null, elder: rng.int(1, 100) <= ELDER_CHANCE, pack: -1 }));
   return { map, spawn, npcs: [], exits: [{ pos: { x: spawn.x, y: spawn.y - 1 }, to: 'overworld', leadsTo: 'hollow' }], monsters };
 }
 

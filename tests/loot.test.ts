@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type ItemId, type World, EQUIP_SLOTS, INVENTORY_SLOTS, ITEMS, MONSTER_DAMAGE,
+  type ItemId, type World, EQUIP_SLOTS, JEWELLERY_SLOTS, NO_GEAR, INVENTORY_SLOTS, ITEMS, MONSTER_DAMAGE,
   PLAYER_MAX_HP, STARTING_WEAPON, UNARMED_DAMAGE, addItem, characterOf, createWorld, droppableEquipment,
   isItemId, playerDamage, playerDefense, step,
 } from '../src/sim';
@@ -30,7 +30,8 @@ describe('item catalogue', () => {
         expect(def.damage[0]).toBeGreaterThan(0);
         expect(def.damage[1]).toBeGreaterThanOrEqual(def.damage[0]);
       }
-      if (def.kind === 'equipment' && def.slot !== 'weapon') expect(def.defense).toBeGreaterThan(0);
+      // Jewellery protects nothing by itself; every other piece of armour does.
+      if (def.kind === 'equipment' && def.slot !== 'weapon') expect(def.defense > 0).toBe(!JEWELLERY_SLOTS.includes(def.slot));
     }
     expect(isItemId('ironSword')).toBe(true);
     expect(isItemId('toString')).toBe(false);
@@ -50,7 +51,7 @@ describe('item catalogue', () => {
 describe('a new hero', () => {
   it('starts with the training weapon, no armour, no coins and an empty bag', () => {
     const { player } = createWorld(1);
-    expect(player.equipment).toEqual({ weapon: STARTING_WEAPON, helmet: null, armor: null, boots: null });
+    expect(player.equipment).toEqual({ ...NO_GEAR, weapon: STARTING_WEAPON });
     expect(player.inventory).toEqual([]);
     expect(player.coins).toBe(0);
     expect(playerDefense(player)).toBe(0);
@@ -179,7 +180,7 @@ describe('equipment', () => {
       const world = openWorld(3);
       const template = createWorld(3).monsters[0]!;
       world.monsters = [{ ...template, pos: { x: world.spawn.x + 0.9, y: world.spawn.y }, home: { ...world.spawn } }];
-      if (armour) world.player.equipment = { weapon: STARTING_WEAPON, helmet: 'ironHelm', armor: 'chainShirt', boots: 'ironGreaves' };
+      if (armour) world.player.equipment = { ...NO_GEAR, weapon: STARTING_WEAPON, helmet: 'ironHelm', armor: 'chainShirt', boots: 'ironGreaves' };
       for (let i = 0; i < 40 && world.player.hp === PLAYER_MAX_HP; i++) step(world);
       return PLAYER_MAX_HP - world.player.hp;
     };

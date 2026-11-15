@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type KeyValueStore, SAVE_VERSION, loadLocale, loadWorld, parseSave, saveLocale, saveWorld, serializeWorld } from '../src/client/save';
-import { createWorld, newCharacter, newHero, step } from '../src/sim';
+import { NO_GEAR, createWorld, newCharacter, newHero, step } from '../src/sim';
 
 function memoryStore(): KeyValueStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -54,7 +54,7 @@ describe('save', () => {
     const world = createWorld(31337);
     world.player.coins = 123;
     world.player.inventory = [{ itemId: 'coal', count: 40 }, { itemId: 'ironSword', count: 1 }];
-    world.player.equipment = { weapon: 'soldierBlade', helmet: null, armor: 'chainShirt', boots: null };
+    world.player.equipment = { ...NO_GEAR, weapon: 'soldierBlade', armor: 'chainShirt' };
     world.loot = [{ id: 7, itemId: 'coins', count: 9, pos: { x: world.spawn.x + 0.5, y: world.spawn.y }, ignored: true }];
     const loaded = parseSave(serializeWorld(world));
     expect(loaded.status).toBe('ok');

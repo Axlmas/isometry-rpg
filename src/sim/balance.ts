@@ -14,8 +14,8 @@ export const WORLD_WIDTH = 100;
 export const WORLD_HEIGHT = 60;
 /** Share of open-world tiles taken by trees. */
 export const WORLD_TREE_CHANCE = 0.06;
-export const MOOR_MONSTERS = 36;
-export const HOLLOW_MONSTERS = 30;
+export const MOOR_MONSTERS = 60;
+export const HOLLOW_MONSTERS = 44;
 export const DUNGEON_SIZE = 24;
 /** Share of dungeon tiles that are pillars. */
 export const PILLAR_CHANCE = 0.1;
@@ -65,9 +65,16 @@ export const PLAYER_ATTACK_WINDUP = ticks(0.1);
 /** Minimum time between two attacks. */
 export const PLAYER_ATTACK_COOLDOWN = ticks(0.45);
 /** Health comes back after this long without taking damage... */
-export const PLAYER_REGEN_DELAY = ticks(5);
+export const PLAYER_REGEN_DELAY = ticks(8);
 /** ...at one point per this many ticks. */
-export const PLAYER_REGEN_INTERVAL = ticks(0.25);
+export const PLAYER_REGEN_INTERVAL = ticks(1);
+
+/** Chance of a critical blow without any gear, in percent, the most gear can raise it to, and what it multiplies damage by. */
+export const CRIT_BASE = 5;
+export const CRIT_MAX = 60;
+export const CRIT_MULTIPLIER = 2;
+/** However quick the gear, attacks never come faster than this. */
+export const PLAYER_ATTACK_COOLDOWN_MIN = ticks(0.2);
 
 // Monsters
 /** Kind IDs are stable: saves and rules use them, the client maps them to art. */
@@ -86,7 +93,7 @@ export const MONSTER_KINDS: Readonly<Record<MonsterKind, { hp: number; damage: n
 /** How many monsters a dungeon holds. */
 export const MONSTER_COUNT = 9;
 /** A dead open-world monster comes back at its place after this long... */
-export const MONSTER_RESPAWN_TIME = ticks(40);
+export const MONSTER_RESPAWN_TIME = ticks(25);
 /** ...but not while the hero stands this close to that place. */
 export const MONSTER_RESPAWN_CLEARANCE = 7;
 /** A monster gives up the chase this far from its place, walks back and heals. */
@@ -99,20 +106,28 @@ export const MONSTER_MAX_HP = 30;
 export const MONSTER_XP = 12;
 /** ...and the share added by each further dungeon level. */
 export const MONSTER_HP_PER_LEVEL = 0.3;
-export const MONSTER_DAMAGE_PER_LEVEL = 0.22;
+export const MONSTER_DAMAGE_PER_LEVEL = 0.16;
 export const MONSTER_XP_PER_LEVEL = 0.3;
-export const MONSTER_DAMAGE: readonly [number, number] = [5, 9];
+export const MONSTER_DAMAGE: readonly [number, number] = [9, 14];
 /** A monster notices the hero within this distance. */
-export const MONSTER_AGGRO_RANGE = 5.5;
+export const MONSTER_AGGRO_RANGE = 4.5;
 /** A monster starts its attack within this distance... */
 export const MONSTER_ATTACK_START = 0.95;
 /** ...and the blow lands if the hero is still within this one. */
 export const MONSTER_ATTACK_REACH = 1.2;
 /** The visible warning before a monster's blow; the hero can step away. */
-export const MONSTER_ATTACK_WINDUP = ticks(0.5);
-export const MONSTER_ATTACK_COOLDOWN = ticks(0.9);
-/** A hit pushes the monster back this far and interrupts its attack. */
+export const MONSTER_ATTACK_WINDUP = ticks(0.4);
+export const MONSTER_ATTACK_COOLDOWN = ticks(0.7);
+/** A hit pushes the monster back this far, unless it has already begun its own blow. */
 export const MONSTER_KNOCKBACK = 0.25;
+/** Open-world monsters live in packs (their size is set per region in zones.ts), standing this close together. */
+export const PACK_RADIUS = 2.5;
+/** A monster that notices the hero calls its pack and every other monster this close. */
+export const MONSTER_LINK_RANGE = 3;
+/** Share of monsters, in percent, that are elders: rare, tough, and generous. */
+export const ELDER_CHANCE = 6;
+/** How an elder differs from an ordinary monster of its kind. */
+export const ELDER = { hp: 3, damage: 1.5, xp: 4, coins: 3, drops: 2 } as const;
 /** How often a monster re-plans its way around walls. */
 export const MONSTER_REPATH_INTERVAL = ticks(0.4);
 

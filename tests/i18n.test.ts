@@ -4,7 +4,7 @@ import en from '../src/i18n/locales/en.json';
 import { pseudolocalize } from '../src/i18n/pseudo';
 
 const KEYS = Object.keys(en) as MessageKey[];
-const SAMPLE = { count: 3, language: 'English', current: 40, max: 100, min: 1, defense: 2, used: 3, total: 24, value: 2, item: 'Coal', level: 3, needed: 260, cost: 8, seconds: 4, skill: 'Sweep', amount: 60, price: 25, gain: 12, zone: 'Stillford', danger: 'a safe place', npc: 'Blacksmith', key: 'Q', scroll: 'Scroll', chance: 66, crystals: 3, have: 2, need: 6, race: 'Elf', cls: 'Mage' };
+const SAMPLE = { count: 3, language: 'English', current: 40, max: 100, min: 1, defense: 2, used: 3, total: 24, value: 2, item: 'Coal', level: 3, needed: 260, cost: 8, seconds: 4, skill: 'Sweep', amount: 60, price: 25, gain: 12, zone: 'Stillford', danger: 'a safe place', npc: 'Blacksmith', key: 'Q', scroll: 'Scroll', chance: 66, crystals: 3, have: 2, need: 6, race: 'Elf', cls: 'Mage', crit: 5, power: 4, haste: 6, speed: 3, name: 'Wolf', quality: 'Rare', percent: '12.34' };
 
 describe('I18n', () => {
   it('formats every message in every locale without problems', () => {

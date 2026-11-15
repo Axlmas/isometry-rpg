@@ -18,6 +18,7 @@ export class DevPanel {
       'dev-level': { type: 'dev', action: 'levelUp' },
       'dev-coins': { type: 'dev', action: 'coins' },
       'dev-kit': { type: 'dev', action: 'kit' },
+      'dev-gear': { type: 'dev', action: 'gear' },
       'dev-heal': { type: 'dev', action: 'heal' },
       'dev-clear': { type: 'dev', action: 'clear' },
       'dev-go-village': { type: 'dev', action: 'teleport', to: 'village' },
