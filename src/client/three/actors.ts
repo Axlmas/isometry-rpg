@@ -72,6 +72,45 @@ function measureStride(holder: THREE.Object3D, model: THREE.Object3D, clip: THRE
   return speed;
 }
 
+/** Clips with their hips put back over the spot where the character stands, per model. */
+const centredClips = new WeakMap<THREE.AnimationClip[], THREE.AnimationClip[]>();
+
+/**
+ * The generated clips carry the hips off the spot where the character stands: the run
+ * holds the whole body a metre ahead of it, the idle a quarter of a metre to the side.
+ * Blending from one to the other then slides the body: a lurch forward when setting off,
+ * a jump of two metres when turning round. Every clip is shifted so that it starts with
+ * the hips straight above the rest pose; movement within a clip, such as a fall, is kept.
+ */
+export function centreHips(clips: THREE.AnimationClip[], model: THREE.Object3D): THREE.AnimationClip[] {
+  const cached = centredClips.get(clips);
+  if (cached) return cached;
+  const hips = findBone(model, /Hips$/);
+  if (!hips?.parent) return clips;
+  const rest = hips.position.clone();
+  // "Up" in the space the hips move in; only the horizontal part of the shift is removed.
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(hips.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
+  const name = `${hips.name}.position`;
+  const out = clips.map((clip) => {
+    const track = clip.tracks.find((t) => t.name === name);
+    if (!track || track.values.length < 3) return clip;
+    const v = track.values;
+    const shift = new THREE.Vector3(v[0]! - rest.x, v[1]! - rest.y, v[2]! - rest.z);
+    shift.addScaledVector(up, -shift.dot(up));
+    if (shift.lengthSq() < 1e-8) return clip;
+    const copy = clip.clone();
+    const values = copy.tracks.find((t) => t.name === name)!.values;
+    for (let i = 0; i + 2 < values.length; i += 3) {
+      values[i]! -= shift.x;
+      values[i + 1]! -= shift.y;
+      values[i + 2]! -= shift.z;
+    }
+    return copy;
+  });
+  centredClips.set(clips, out);
+  return out;
+}
+
 /** Bones that belong to the legs: they follow walking and running while the arms are busy. */
 const LOWER_BODY = /(Hips|UpLeg|Leg|Foot|Toe)/;
 
@@ -223,15 +262,16 @@ export class Humanoid {
     this.mountSocket(model, 'right');
     this.mountSocket(model, 'left');
 
+    const animations = centreHips(gltf.animations, model);
     // Strides are measured on the whole clips, before they are split into halves.
     const feet = ['Left', 'Right'].map((s) => findBone(model, new RegExp(`${s}ToeBase$`)) ?? findBone(model, new RegExp(`${s}Foot$`))).filter((b): b is THREE.Object3D => !!b);
     for (const name of ['walk', 'run']) {
-      const clip = gltf.animations.find((c) => c.name === name);
+      const clip = animations.find((c) => c.name === name);
       if (clip && feet.length === 2) this.strides.set(name, measureStride(this.pose, model, clip, feet));
     }
 
-    const clips = gltf.animations.flatMap(splitClip);
-    const builder = new PoseBuilder(model, this.object, this.sockets, gltf.animations.find((c) => c.name === 'idle'));
+    const clips = animations.flatMap(splitClip);
+    const builder = new PoseBuilder(model, this.object, this.sockets, animations.find((c) => c.name === 'idle'));
     if (builder.ok) clips.push(...combatMoves(builder));
     this.mixer = new THREE.AnimationMixer(model);
     const actions = new Map<string, THREE.AnimationAction>();

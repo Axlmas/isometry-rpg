@@ -12,7 +12,6 @@ import { sound, unlockSound } from '../sound';
 import { type CharacterId, type WeaponId, CHARACTERS, Library, TILE } from './assets';
 import { Beast, Humanoid, type Motion, setOpacity } from './actors';
 import { Effects, disposeTree } from './effects';
-import { Follower } from './follow';
 import { Stage } from './stage';
 import { SEE_THROUGH, type Terrain, buildTerrain } from './terrain';
 
@@ -140,6 +139,8 @@ export class WorldScene {
   private pending: Command[] = [];
   private accumulator = 0;
   private lastFrameAt = performance.now();
+  /** Debug only (`?stats`): frames are driven by `__three.advance(ms)` instead of the screen. */
+  private manualClock: number | null = null;
   private previous: Point = { x: 0, y: 0 };
   private wasMoving = false;
   private lastStats = '';
@@ -167,7 +168,6 @@ export class WorldScene {
   /** When the hero last struck or was struck: he stays in a fighting stance for a while. */
   private lastFight = -1e9;
   /** The hero's drawn body, which gathers speed instead of jumping to it. */
-  private readonly heroBody = new Follower();
   private readonly heroTarget = new THREE.Vector3();
   private readonly heroRuleVel = new THREE.Vector3();
   private readonly heroFace = new THREE.Vector3();
@@ -188,7 +188,7 @@ export class WorldScene {
     });
     const frame = (now: number) => {
       requestAnimationFrame(frame);
-      this.frame(now);
+      if (this.manualClock === null) this.frame(now);
     };
     requestAnimationFrame(frame);
   }
@@ -244,7 +244,6 @@ export class WorldScene {
     if (isAlive(world)) hero.revive();
     else hero.die();
     const start = at(world.player.pos);
-    this.heroBody.reset(start);
     hero.update(0, { position: start, speed: 0, face: null });
     this.syncMonsters(1, 0);
     this.syncLoot(0);
@@ -352,6 +351,11 @@ export class WorldScene {
           }).filter(Boolean),
           hero: () => this.hero,
           send: (command: Command) => this.pending.push(command),
+          // Frame-by-frame stepping for measurements: freeze() stops the screen-driven loop,
+          // advance(ms) draws one frame that long after the previous one.
+          freeze: () => { this.manualClock = this.lastFrameAt; },
+          advance: (ms: number) => { this.manualClock = (this.manualClock ?? this.lastFrameAt) + ms; this.frame(this.manualClock); },
+          world: () => this.world,
           bag: () => this.world.player.inventory.map((stack) => stack?.itemId ?? null),
           loot: () => this.world.loot.map((l) => {
             const ok = this.stage.project(at(l.pos).setY(0.15), this.screen);
@@ -374,10 +378,8 @@ export class WorldScene {
   }
 
   /**
-   * The rules move the hero at full speed from the first tick. On screen that reads as a
-   * jolt, so the body that is drawn follows the rules' position with a limited
-   * acceleration: it gathers speed over a fifth of a second and catches up within half a
-   * metre. Feet, camera and facing all follow this body.
+   * The hero is drawn exactly where the rules put him, between the last two ticks. He sets
+   * off and stops at once, as in classic MMORPGs; the legs blend from standing into running.
    */
   private syncHero(alpha: number, dt: number): void {
     const hero = this.hero!;
@@ -387,15 +389,12 @@ export class WorldScene {
       (this.previous.y + (player.pos.y - this.previous.y) * alpha) * TILE,
     );
     const ruleVel = this.heroRuleVel.set(player.pos.x - this.previous.x, 0, player.pos.y - this.previous.y).multiplyScalar((TILE * 1000) / TICK_MS);
-    const body = this.heroBody;
-    body.update(target, ruleVel, dt);
-    const vel = body.velocity;
-    const speed = Math.hypot(vel.x, vel.z);
+    const speed = Math.hypot(ruleVel.x, ruleVel.z);
     let face: THREE.Vector3 | null = null;
     if (player.pendingAttack || player.attackCooldown > 0) face = this.heroFace.set(player.facing.x, 0, player.facing.y);
-    else if (speed > 0.3) face = this.heroFace.copy(vel);
+    else if (speed > 0.3) face = this.heroFace.copy(ruleVel);
     hero.setCombat(this.lockedId !== null || performance.now() - this.lastFight < 4000);
-    hero.update(dt, { position: body.position, speed, face });
+    hero.update(dt, { position: target, speed, face });
   }
 
   /** Where the hero is on screen, for the circle in which trees and houses dissolve. */
