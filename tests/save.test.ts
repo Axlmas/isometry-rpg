@@ -143,6 +143,20 @@ describe('save', () => {
     expect(loaded.world.loot).toEqual(world.loot);
   });
 
+  it('remembers learned recipes and rejects impossible ones', () => {
+    const world = createWorld(31337, { ...newCharacter('trainingSword'), recipes: ['ironHelm', 'chainShirt'] });
+    world.player.inventory = [{ itemId: 'recipeSoldierBlade', count: 2 }, { itemId: 'steelIngot', count: 40 }];
+    const loaded = parseSave(serializeWorld(world));
+    expect(loaded.status === 'ok' && loaded.world.player.recipes).toEqual(['ironHelm', 'chainShirt']);
+    expect(loaded.status === 'ok' && loaded.world.player.inventory).toEqual(world.player.inventory);
+    const good = JSON.parse(serializeWorld(world)) as Record<string, unknown>;
+    for (const recipes of [['steelIngot'], ['ironHelm', 'ironHelm'], ['nope'], 'all', undefined]) {
+      expect(parseSave(JSON.stringify({ ...good, recipes })).status, JSON.stringify(recipes)).toBe('damaged');
+    }
+    const v9 = parseSave(JSON.stringify({ ...good, version: 9, recipes: undefined }));
+    expect(v9.status === 'ok' && v9.world.player.recipes).toEqual([]);
+  });
+
   it('rejects saves with impossible skills or tempering', () => {
     const good = JSON.parse(serializeWorld(createWorld(1, { ...newCharacter('trainingSword'), level: 5 }))) as Record<string, unknown>;
     const zero = { weapon: 0, helmet: 0, armor: 0, boots: 0 };

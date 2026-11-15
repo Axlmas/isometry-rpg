@@ -1,5 +1,6 @@
 export * from './balance';
 export * from './collision';
+export * from './crafting';
 export * from './grid';
 export * from './inventory';
 export * from './items';

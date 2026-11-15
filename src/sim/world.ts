@@ -2,6 +2,7 @@ import { MAX_LEVEL, type MonsterKind, WORLD_SEED } from './balance';
 import type { GridMap, Point } from './grid';
 import { type Character, type ItemStack, newCharacter } from './inventory';
 import { type EquipSlot, type ItemId, STARTING_WEAPON } from './items';
+import type { RecipeId } from './crafting';
 import type { ItemTarget } from './enchant';
 import type { Npc, NpcKind } from './npcs';
 import { maxHpAtLevel, maxMpAtLevel, monsterMaxHp } from './progression';
@@ -52,6 +53,8 @@ export interface Player {
   skillCooldowns: Record<SkillId, number>;
   /** Skills the hero has been taught by the trainer. */
   skills: SkillId[];
+  /** Recipes the hero has learned from recipe items. */
+  recipes: RecipeId[];
   /** When on, every blow spends a weapon charge and hits harder. */
   chargesOn: boolean;
   /** Ticks until the next potion can be drunk. */
@@ -130,6 +133,13 @@ export type GameEvent =
   | { type: 'enchantDenied'; reason: 'far' | 'scroll' | 'max' }
   | { type: 'crystallized'; itemId: ItemId; crystals: number }
   | { type: 'crystallizeDenied'; reason: 'far' | 'noCrystals' | 'full' }
+  | { type: 'recipeLearned'; recipe: RecipeId }
+  /** The hero tried to read a recipe they already know. */
+  | { type: 'recipeDenied'; recipe: RecipeId }
+  | { type: 'crafted'; recipe: RecipeId; itemId: ItemId; count: number }
+  /** The attempt failed and the ingredients are gone. */
+  | { type: 'craftFailed'; recipe: RecipeId }
+  | { type: 'craftDenied'; recipe: RecipeId; reason: 'far' | 'unknown' | 'materials' | 'full' }
   | { type: 'guardStrike'; npcId: number; monsterId: number; damage: number; pos: Point; died: boolean }
   | { type: 'playerRespawned' }
   | { type: 'lootDropped'; id: number }
@@ -182,7 +192,7 @@ export type Command =
   | { type: 'unequip'; slot: EquipSlot }
   /** Drop an inventory slot on the floor. */
   | { type: 'drop'; index: number }
-  /** Drink a potion from the bag. */
+  /** Use an item from the bag: drink a potion or read a recipe. */
   | { type: 'use'; itemId: ItemId }
   /** Switch weapon charges on or off. */
   | { type: 'toggleCharges' }
@@ -194,6 +204,8 @@ export type Command =
   /** Have the blacksmith enchant an item, or break one from the bag into crystals. */
   | { type: 'enchant'; target: ItemTarget }
   | { type: 'crystallize'; index: number }
+  /** Have the blacksmith make something from a recipe. */
+  | { type: 'craft'; recipe: RecipeId }
   /** Leave through the exit the hero is standing at. */
   | { type: 'travel' };
 
@@ -265,6 +277,7 @@ export function createWorld(
       maxMp: maxMpAtLevel(level),
       skillCooldowns: { heavyBlow: 0, sweep: 0, secondWind: 0 },
       skills: [...(character.skills ?? [])],
+      recipes: [...(character.recipes ?? [])],
       chargesOn: false,
       potionCooldown: 0,
       facing: { x: 1, y: 1 },

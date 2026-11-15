@@ -6,6 +6,7 @@ import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
 import { dropFromInventory, equipFromInventory, pickUpLoot, spendCharge, toggleCharges, unequip, useItem } from './inventory';
+import { craft } from './crafting';
 import { crystallize, enchant } from './enchant';
 import { buy, learn, sell } from './npcs';
 import { travel } from './travel';
@@ -137,6 +138,9 @@ function applyCommand(world: World, command: Command): void {
       return;
     case 'crystallize':
       crystallize(world, command.index);
+      return;
+    case 'craft':
+      craft(world, command.recipe);
       return;
   }
 }

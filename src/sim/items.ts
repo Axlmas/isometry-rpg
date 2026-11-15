@@ -1,3 +1,4 @@
+import type { RecipeId } from './crafting';
 /**
  * Item catalogue. IDs are stable: saves, rules and drop tables use them, and
  * the client maps them to names and art. Never rename or reuse an ID that has
@@ -19,7 +20,9 @@ export type ItemId =
   | 'leatherBoots' | 'ironGreaves'
   | 'healthPotion' | 'manaPotion' | 'chargePlain' | 'chargeD'
   | 'crystalD'
-  | 'scrollWeaponPlain' | 'scrollArmorPlain' | 'scrollWeaponD' | 'scrollArmorD';
+  | 'scrollWeaponPlain' | 'scrollArmorPlain' | 'scrollWeaponD' | 'scrollArmorD'
+  | 'steelIngot' | 'tannedLeather' | 'cord'
+  | 'recipeSoldierBlade' | 'recipeIronHelm' | 'recipeChainShirt' | 'recipeIronGreaves';
 
 export type ConsumableEffect =
   | { kind: 'heal'; amount: number }
@@ -34,6 +37,8 @@ export type ItemDef =
   /** Crafting resource; identical ones share a slot up to `maxStack`. */
   | { id: ItemId; kind: 'material'; maxStack: number; price: number }
   | { id: ItemId; kind: 'consumable'; maxStack: number; price: number; effect: ConsumableEffect }
+  /** Read once to learn how to craft something; the hero then remembers it for good. */
+  | { id: ItemId; kind: 'recipe'; maxStack: number; price: number; recipe: RecipeId }
   /** Spent at the blacksmith to enchant a weapon or a piece of armour of the given grade. */
   | { id: ItemId; kind: 'scroll'; maxStack: number; price: number; target: 'weapon' | 'armor'; grade: Grade }
   | { id: ItemId; kind: 'equipment'; slot: 'weapon'; grade: Grade; damage: readonly [number, number]; price: number }
@@ -70,6 +75,16 @@ export const ITEMS: Readonly<Record<ItemId, ItemDef>> = {
 
   crystalD: { id: 'crystalD', kind: 'material', maxStack: 999, price: 12 },
 
+  // Worked materials: made at the blacksmith's from what monsters drop.
+  steelIngot: { id: 'steelIngot', kind: 'material', maxStack: MATERIAL_STACK, price: 40 },
+  tannedLeather: { id: 'tannedLeather', kind: 'material', maxStack: MATERIAL_STACK, price: 28 },
+  cord: { id: 'cord', kind: 'material', maxStack: MATERIAL_STACK, price: 18 },
+
+  recipeSoldierBlade: { id: 'recipeSoldierBlade', kind: 'recipe', maxStack: MATERIAL_STACK, price: 400, recipe: 'soldierBlade' },
+  recipeIronHelm: { id: 'recipeIronHelm', kind: 'recipe', maxStack: MATERIAL_STACK, price: 250, recipe: 'ironHelm' },
+  recipeChainShirt: { id: 'recipeChainShirt', kind: 'recipe', maxStack: MATERIAL_STACK, price: 350, recipe: 'chainShirt' },
+  recipeIronGreaves: { id: 'recipeIronGreaves', kind: 'recipe', maxStack: MATERIAL_STACK, price: 250, recipe: 'ironGreaves' },
+
   scrollWeaponPlain: { id: 'scrollWeaponPlain', kind: 'scroll', maxStack: MATERIAL_STACK, price: 120, target: 'weapon', grade: 'none' },
   scrollArmorPlain: { id: 'scrollArmorPlain', kind: 'scroll', maxStack: MATERIAL_STACK, price: 60, target: 'armor', grade: 'none' },
   scrollWeaponD: { id: 'scrollWeaponD', kind: 'scroll', maxStack: MATERIAL_STACK, price: 600, target: 'weapon', grade: 'd' },
@@ -97,6 +112,7 @@ export const DROP_D_EQUIPMENT_CHANCE = 5;
 export const DROP_POTION_CHANCE = 8;
 export const DROP_CHARGES_CHANCE = 10;
 export const DROP_SCROLL_CHANCE = 4;
+export const DROP_RECIPE_CHANCE = 3;
 export const DROP_SCROLLS: readonly ItemId[] = ['scrollWeaponPlain', 'scrollArmorPlain', 'scrollArmorPlain', 'scrollWeaponD', 'scrollArmorD'];
 export const DROP_MATERIAL_COUNT: readonly [number, number] = [1, 2];
 export const DROP_CHARGES_COUNT: readonly [number, number] = [8, 20];
@@ -117,8 +133,10 @@ export function maxStackOf(itemId: ItemId): number {
   return def.kind === 'equipment' || def.kind === 'currency' ? 1 : def.maxStack;
 }
 
-/** Materials that monsters drop. Crystals are not among them: they only come from broken equipment. */
-export const MATERIAL_IDS: readonly ItemId[] = (Object.keys(ITEMS) as ItemId[]).filter((id) => ITEMS[id].kind === 'material' && id !== 'crystalD');
+/** Raw materials: the ones monsters drop. Crystals and worked materials are made, not found. */
+export const MATERIAL_IDS: readonly ItemId[] = ['leather', 'ironOre', 'coal', 'bone', 'thread'];
+/** Recipe items; monsters drop them now and then, and the blacksmith sells them. */
+export const RECIPE_ITEMS: readonly ItemId[] = (Object.keys(ITEMS) as ItemId[]).filter((id) => ITEMS[id].kind === 'recipe');
 
 /** How many crystals an item turns into when it is broken up. Only graded equipment gives any. */
 export function crystalsFor(itemId: ItemId): number {

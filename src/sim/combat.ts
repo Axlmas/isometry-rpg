@@ -8,8 +8,8 @@ import type { Point } from './grid';
 import { dropLoot, playerDamage, playerDefense } from './inventory';
 import {
   DROP_CHARGES_CHANCE, DROP_CHARGES_COUNT, DROP_COINS, DROP_D_EQUIPMENT_CHANCE, DROP_MATERIAL_CHANCE,
-  DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE, DROP_POTIONS, DROP_POTION_CHANCE, DROP_SCROLLS, DROP_SCROLL_CHANCE,
-  MATERIAL_IDS, droppableEquipment,
+  DROP_MATERIAL_COUNT, DROP_PLAIN_EQUIPMENT_CHANCE, DROP_POTIONS, DROP_POTION_CHANCE, DROP_RECIPE_CHANCE, DROP_SCROLLS,
+  DROP_SCROLL_CHANCE, MATERIAL_IDS, RECIPE_ITEMS, droppableEquipment,
 } from './items';
 import { guardDuty } from './npcs';
 import { findPath } from './pathfinding';
@@ -48,6 +48,7 @@ function dropMonsterLoot(world: World, at: Point): void {
   else if (chance <= potion) dropLoot(world, pick(world, DROP_POTIONS), 1, beside);
   else if (chance <= charges) dropLoot(world, 'chargePlain', roll(world, DROP_CHARGES_COUNT), beside);
   else if (chance <= charges + DROP_SCROLL_CHANCE) dropLoot(world, pick(world, DROP_SCROLLS), 1, beside);
+  else if (chance <= charges + DROP_SCROLL_CHANCE + DROP_RECIPE_CHANCE) dropLoot(world, pick(world, RECIPE_ITEMS), 1, beside);
 }
 
 /** Removes dead monsters. In the open world they come back after a while; a dungeon stays cleared. */

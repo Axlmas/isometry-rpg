@@ -93,7 +93,7 @@ describe('monster drops', () => {
     expect(equipment / kills).toBeLessThan(0.32);
     expect(consumables / kills).toBeGreaterThan(0.09);
     expect(consumables / kills).toBeLessThan(0.29);
-    expect(scrolls / kills).toBeLessThan(0.1); // scrolls are rare: 4%
+    expect(scrolls / kills).toBeLessThan(0.14); // scrolls and recipes are rare: 4% and 3%
   });
 });
 

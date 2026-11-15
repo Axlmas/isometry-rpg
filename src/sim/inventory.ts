@@ -3,6 +3,7 @@ import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { ENCHANT_ARMOR_BONUS, ENCHANT_WEAPON_BONUS } from './balance';
 import { type EquipSlot, type ItemDef, type ItemId, CHARGE_FOR_GRADE, EQUIP_SLOTS, ITEMS, maxStackOf } from './items';
+import { type RecipeId, learnRecipe } from './crafting';
 import type { SkillId } from './skills';
 import type { Player, World } from './world';
 
@@ -25,6 +26,8 @@ export interface Character {
   equipmentEnchant?: Record<EquipSlot, number>;
   /** Skills learned from the trainer; none when left out. */
   skills?: SkillId[];
+  /** Recipes learned from recipe items; none when left out. */
+  recipes?: RecipeId[];
   /** Current health and mana, when they should carry over; otherwise the hero arrives fully restored. */
   hp?: number;
   mp?: number;
@@ -40,13 +43,14 @@ export function newCharacter(startingWeapon: ItemId): Character {
 }
 
 export function characterOf(world: World): Character {
-  const { level, xp, coins, inventory, equipment, equipmentEnchant, skills } = world.player;
+  const { level, xp, coins, inventory, equipment, equipmentEnchant, skills, recipes } = world.player;
   return {
     level, xp, coins,
     inventory: inventory.map((stack) => ({ ...stack })),
     equipment: { ...equipment },
     equipmentEnchant: { ...equipmentEnchant },
     skills: [...skills],
+    recipes: [...recipes],
   };
 }
 
@@ -173,10 +177,11 @@ export function toggleCharges(world: World): void {
   player.revision += 1;
 }
 
-/** Drinks a potion from the bag. */
+/** Uses an item from the bag: drinks a potion or reads a recipe. */
 export function useItem(world: World, itemId: ItemId): void {
   const { player } = world;
   const def = Object.prototype.hasOwnProperty.call(ITEMS, itemId) ? ITEMS[itemId] : null;
+  if (def?.kind === 'recipe') return learnRecipe(world, itemId);
   if (!def || def.kind !== 'consumable' || def.effect.kind === 'charge') return;
   const { effect } = def;
   const deny = (reason: 'none' | 'cooldown' | 'notNeeded') => world.events.push({ type: 'useDenied', itemId, reason });

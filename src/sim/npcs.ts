@@ -22,7 +22,10 @@ export interface Npc {
 export const SHOP_STOCK: Readonly<Partial<Record<NpcKind, readonly ItemId[]>>> = {
   alchemist: ['healthPotion', 'manaPotion', 'chargePlain', 'chargeD'],
   outfitter: ['ironSword', 'leatherCap', 'leatherJerkin', 'leatherBoots'],
-  blacksmith: ['scrollWeaponPlain', 'scrollArmorPlain', 'scrollWeaponD', 'scrollArmorD'],
+  blacksmith: [
+    'scrollWeaponPlain', 'scrollArmorPlain', 'scrollWeaponD', 'scrollArmorD', 'crystalD',
+    'recipeSoldierBlade', 'recipeIronHelm', 'recipeChainShirt', 'recipeIronGreaves',
+  ],
 };
 
 /** What the trainer asks for teaching each skill, in coins. */
