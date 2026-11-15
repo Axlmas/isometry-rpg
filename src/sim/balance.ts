@@ -104,11 +104,11 @@ export const MONSTER_KINDS: Readonly<Record<MonsterKind, { hp: number; damage: n
   // Young and harmless unless provoked: the first prey of a new hero.
   wolfPup: { hp: 0.6, damage: 0.6, xp: 0.5, speed: 4.1, aggro: 0, social: 0 },
   // Weak alone, but it attacks on sight, cannot be outrun and never comes alone for long.
-  wolf: { hp: 0.65, damage: 0.75, xp: 0.6, speed: 4.9, aggro: 3.6, social: 2.8 },
+  wolf: { hp: 0.65, damage: 0.9, xp: 0.6, speed: 4.9, aggro: 3.6, social: 2.8 },
   // Peaceful, slow and tough; hit one and the herd around it turns on the hero.
   boar: { hp: 1.15, damage: 0.95, xp: 0.95, speed: 3.6, aggro: 0, social: 3.2 },
   // A loner that attacks on sight and hits hardest of all the beasts.
-  tusker: { hp: 1.45, damage: 1.15, xp: 1.4, speed: 4.3, aggro: 4, social: 0 },
+  tusker: { hp: 1.3, damage: 1.15, xp: 1.4, speed: 4.3, aggro: 4, social: 0 },
   grunt: { hp: 1, damage: 1, xp: 1, speed: 3.9, aggro: 4.5, social: 3 },
 };
 /** An elder of any kind attacks on sight from at least this far. */
@@ -129,7 +129,7 @@ export const MONSTER_LEASH = 12;
 export const MONSTER_MIN_SPAWN_DISTANCE = 6;
 export const MONSTER_RADIUS = 0.3;
 /** Health, damage and experience of a monster in a level 1 dungeon... */
-export const MONSTER_MAX_HP = 30;
+export const MONSTER_MAX_HP = 80;
 export const MONSTER_XP = 12;
 /** ...and the share added by each further dungeon level. */
 export const MONSTER_HP_PER_LEVEL = 0.3;
