@@ -181,20 +181,35 @@ export class Stage {
     if (typical > 1 / 45) {
       this.calm = 0;
       this.ceiling = Math.min(this.ceiling, this.pixelRatio - 0.05);
-      next = Math.max(0.6, this.pixelRatio - 0.15);
+      next = Math.max(0.75, this.pixelRatio - 0.15);
     } else if (typical < 1 / 58 && ++this.calm >= 3) {
       this.calm = 0;
       next = Math.min(this.ceiling, this.pixelRatio + 0.1);
     }
     if (Math.abs(next - this.pixelRatio) < 0.01) return;
-    this.pixelRatio = next;
-    this.renderer.setPixelRatio(next);
+    this.setResolution(next);
+  }
+
+  /**
+   * Render resolution as a share of the screen's pixels. The post-processing chain keeps its
+   * own copy of it: both are changed together, or the scene would still be drawn at the old
+   * size and anything placed in screen pixels (the see-through circle) would drift.
+   */
+  setResolution(ratio: number): void {
+    this.pixelRatio = ratio;
+    this.renderer.setPixelRatio(ratio);
+    this.composer.setPixelRatio(ratio);
     this.resize();
   }
 
   /** Current render resolution share, for the stats readout. */
   get resolution(): number {
     return this.pixelRatio;
+  }
+
+  /** Size in pixels of the image the scene is drawn into: the space of `gl_FragCoord`. */
+  sceneSize(out: THREE.Vector2): THREE.Vector2 {
+    return out.set(this.composer.renderTarget1.width, this.composer.renderTarget1.height);
   }
 
   /** Screen pixel position of a point in the world, or null when it is behind the camera. */

@@ -356,6 +356,7 @@ export class WorldScene {
           freeze: () => { this.manualClock = this.lastFrameAt; },
           advance: (ms: number) => { this.manualClock = (this.manualClock ?? this.lastFrameAt) + ms; this.frame(this.manualClock); },
           world: () => this.world,
+          stage: this.stage,
           bag: () => this.world.player.inventory.map((stack) => stack?.itemId ?? null),
           loot: () => this.world.loot.map((l) => {
             const ok = this.stage.project(at(l.pos).setY(0.15), this.screen);
@@ -397,13 +398,15 @@ export class WorldScene {
     hero.update(dt, { position: target, speed, face });
   }
 
+  private readonly seeSize = new THREE.Vector2();
+
   /** Where the hero is on screen, for the circle in which trees and houses dissolve. */
   private updateSeeThrough(): void {
     const chest = this.hero!.position.clone().setY(1.1);
     const camera = this.stage.camera;
     const view = chest.clone().applyMatrix4(camera.matrixWorldInverse);
     const ndc = chest.clone().project(camera);
-    const size = this.stage.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const size = this.stage.sceneSize(this.seeSize);
     SEE_THROUGH.uSeeCenter.value.set((ndc.x * 0.5 + 0.5) * size.x, (ndc.y * 0.5 + 0.5) * size.y);
     SEE_THROUGH.uSeeRadius.value = size.y * 0.16;
     SEE_THROUGH.uSeeDepth.value = -view.z;
