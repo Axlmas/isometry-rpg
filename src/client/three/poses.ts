@@ -208,8 +208,16 @@ function dir(v: Vec): THREE.Vector3 {
 
 // ------------------------------------------------------------------ the moves
 
-/** Seconds from the start of an attack clip to the moment the blow lands. */
-export const IMPACT_AT = 0.1;
+/**
+ * Seconds from the start of an attack clip to the moment the blow lands. It matches the
+ * rules' wind-up (PLAYER_ATTACK_WINDUP), so the clips play at their own pace.
+ */
+export const IMPACT_AT = 0.35;
+/** The blade is cocked back by then: a readable wind-up, then a quick strike. */
+const COCKED_AT = 0.22;
+/** End of the follow-through, and of the whole move, back in the ready stance. */
+const FOLLOW_AT = 0.46;
+const SETTLED_AT = 0.9;
 
 const RELAXED: Record<'right' | 'left', ArmPose> = {
   right: { upper: [-0.2, -1, 0.1], fore: [-0.08, -0.85, 0.5] },
@@ -246,8 +254,8 @@ function noGrip(pose: Pose): Pose {
 }
 
 /**
- * The fighting moves. Every attack lands at IMPACT_AT seconds and settles back into the
- * ready stance; quick, with the torso turning into the blow and a short follow-through.
+ * The fighting moves. Every attack winds up, lands at IMPACT_AT seconds and settles back
+ * into the ready stance, with the torso turning into the blow and a short follow-through.
  */
 export function combatMoves(b: PoseBuilder): THREE.AnimationClip[] {
   const stance = (name: string, pose: Pose) => b.clip(name, [
@@ -258,7 +266,7 @@ export function combatMoves(b: PoseBuilder): THREE.AnimationClip[] {
   // The wind-up stays at shoulder height: a raised-overhead blade reads as chopping wood.
   const swordA: Key[] = [
     { t: 0, pose: SWORD_READY },
-    { t: 0.05, pose: {
+    { t: COCKED_AT, pose: {
       yaw: -0.5, pitch: 0.08,
       right: { upper: [-0.8, 0.05, -0.55], fore: [-0.3, 0.3, -0.9], grip: [-0.45, 0.45, -0.75] },
       left: { upper: [0.5, -0.7, 0.4], fore: [0.3, -0.2, 0.95] },
@@ -268,17 +276,17 @@ export function combatMoves(b: PoseBuilder): THREE.AnimationClip[] {
       right: { upper: [0.05, -0.2, 0.98], fore: [0.65, -0.15, 0.75], grip: [0.85, -0.25, 0.45] },
       left: { upper: [0.55, -0.8, -0.1], fore: [0.4, -0.6, -0.6] },
     } },
-    { t: 0.19, pose: {
+    { t: FOLLOW_AT, pose: {
       yaw: 0.6, pitch: 0.25,
       right: { upper: [0.4, -0.45, 0.8], fore: [0.85, -0.35, 0.25], grip: [0.5, -0.55, -0.65] },
       left: { upper: [0.55, -0.8, -0.1], fore: [0.4, -0.6, -0.6] },
     } },
-    { t: 0.45, pose: SWORD_READY },
+    { t: SETTLED_AT, pose: SWORD_READY },
   ];
   // Flat backhand from the left back across to the right.
   const swordB: Key[] = [
     { t: 0, pose: SWORD_READY },
-    { t: 0.05, pose: {
+    { t: COCKED_AT, pose: {
       yaw: 0.6, pitch: 0.1,
       right: { upper: [0.35, -0.25, 0.9], fore: [0.95, 0, 0.25], grip: [0.55, 0.1, -0.8] },
       left: { upper: [0.6, -0.75, -0.1], fore: [0.5, -0.5, -0.6] },
@@ -288,25 +296,25 @@ export function combatMoves(b: PoseBuilder): THREE.AnimationClip[] {
       right: { upper: [-0.35, -0.15, 0.92], fore: [-0.6, 0, 0.8], grip: [-0.8, 0.05, 0.6] },
       left: { upper: [0.35, -0.85, 0.35], fore: [0.3, -0.4, 0.85] },
     } },
-    { t: 0.19, pose: {
+    { t: FOLLOW_AT, pose: {
       yaw: -0.5, pitch: 0.15,
       right: { upper: [-0.8, -0.15, 0.55], fore: [-0.95, -0.05, 0], grip: [-0.5, 0, -0.85] },
       left: { upper: [0.35, -0.85, 0.35], fore: [0.3, -0.4, 0.85] },
     } },
-    { t: 0.45, pose: SWORD_READY },
+    { t: SETTLED_AT, pose: SWORD_READY },
   ];
   // Pull the string to the cheek, loose, the hand flies back past the ear.
   const bow: Key[] = [
     { t: 0, pose: BOW_READY },
-    { t: 0.06, pose: { ...BOW_READY, right: { upper: [-0.6, 0.05, -0.8], fore: [0.65, 0.18, 0.74] } } },
+    { t: 0.28, pose: { ...BOW_READY, right: { upper: [-0.6, 0.05, -0.8], fore: [0.65, 0.18, 0.74] } } },
     { t: IMPACT_AT, pose: { ...BOW_READY, right: { upper: [-0.6, 0.15, -0.78], fore: [-0.35, 0.25, -0.9] } } },
-    { t: 0.28, pose: { ...BOW_READY, right: { upper: [-0.6, 0.1, -0.78], fore: [-0.2, 0.15, -0.95] } } },
-    { t: 0.5, pose: BOW_READY },
+    { t: 0.52, pose: { ...BOW_READY, right: { upper: [-0.6, 0.1, -0.78], fore: [-0.2, 0.15, -0.95] } } },
+    { t: SETTLED_AT, pose: BOW_READY },
   ];
   // Gather, then thrust staff and open hand at the enemy.
   const staff: Key[] = [
     { t: 0, pose: STAFF_READY },
-    { t: 0.06, pose: {
+    { t: COCKED_AT, pose: {
       yaw: 0.3, pitch: -0.05,
       right: { upper: [-0.55, 0.1, 0.8], fore: [-0.1, 0.55, 0.83], grip: [0, 0.85, 0.5] },
       left: { upper: [0.45, -0.3, 0.85], fore: [0.1, 0.2, 0.98] },
@@ -316,12 +324,12 @@ export function combatMoves(b: PoseBuilder): THREE.AnimationClip[] {
       right: { upper: [-0.25, 0, 0.97], fore: [0.05, 0.25, 0.97], grip: [0.05, 0.6, 0.8] },
       left: { upper: [0.25, -0.05, 0.97], fore: [0, 0.05, 1] },
     } },
-    { t: 0.26, pose: {
+    { t: 0.55, pose: {
       yaw: 0.05, pitch: 0.15,
       right: { upper: [-0.25, 0, 0.97], fore: [0.05, 0.25, 0.97], grip: [0.05, 0.6, 0.8] },
       left: { upper: [0.25, -0.05, 0.97], fore: [0, 0.05, 1] },
     } },
-    { t: 0.5, pose: STAFF_READY },
+    { t: SETTLED_AT, pose: STAFF_READY },
   ];
   const bare = (keys: Key[]) => keys.map((k) => ({ t: k.t, pose: noGrip(k.pose) }));
 

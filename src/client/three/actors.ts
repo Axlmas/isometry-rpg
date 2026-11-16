@@ -316,7 +316,7 @@ export class Humanoid {
    * A blow, a shot or a spell, depending on the weapon. `impactIn` is how many seconds
    * from now it lands: the clip is timed so the weapon meets the target then.
    */
-  attack(impactIn = 0.1): void {
+  attack(impactIn = IMPACT_AT): void {
     const upper = this.upper;
     if (this.dead || !upper) return;
     let name = this.weapon === 'sword' || this.weapon === 'none' ? `atk-${this.weapon}-${this.combo % 2 === 0 ? 'a' : 'b'}` : `atk-${this.weapon}`;

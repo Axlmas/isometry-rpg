@@ -5,7 +5,7 @@ import {
 import { clearLine, pushOutOfWalls } from './collision';
 import { resetMonsters, resolvePlayerAttack, updateMonsters } from './combat';
 import { type Point, isWalkable } from './grid';
-import { attackCooldown, dropFromInventory, equipFromInventory, gearStats, pickUp, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
+import { attackCooldown, dropFromInventory, equipFromInventory, gearStats, isStriking, pickUp, spendCharge, toggleCharges, unequip, useItem, weaponInHand } from './inventory';
 import { fire, updateProjectiles } from './projectiles';
 import { CLASSES, RACES } from './classes';
 import { craft } from './crafting';
@@ -163,7 +163,7 @@ function movePlayer(world: World): void {
   const before = { ...player.pos };
   const haste = player.hasteTicks > 0 ? player.hasteFactor : 1;
   // Striking roots the hero for a moment: one can fight or run, not both at once.
-  const striking = player.attackCooldown > 0 || player.pendingAttack !== null ? PLAYER_ATTACK_SLOW : 1;
+  const striking = isStriking(player) ? PLAYER_ATTACK_SLOW : 1;
   let remaining = (PLAYER_SPEED * RACES[player.race].speed * haste * striking * (1 + gearStats(player).speed / 100) * TICK_MS) / 1000;
 
   if (player.moveDir.x !== 0 || player.moveDir.y !== 0) {
@@ -197,7 +197,7 @@ function movePlayer(world: World): void {
   const walked = Math.hypot(dx, dy);
   player.distance += walked;
   // The hero looks where they walk, unless a swing is in progress.
-  if (walked > 1e-6 && player.pendingAttack === null && player.attackCooldown === 0) {
+  if (walked > 1e-6 && !isStriking(player)) {
     player.facing = { x: dx / walked, y: dy / walked };
   }
 }

@@ -1,4 +1,4 @@
-import { type MonsterKind, CRIT_BASE, CRIT_MAX, MASTERY_TIERS, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_COOLDOWN_MIN, INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
+import { type MonsterKind, CRIT_BASE, CRIT_MAX, MASTERY_TIERS, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_COOLDOWN_MIN, PLAYER_ATTACK_RECOVERY, PLAYER_ATTACK_WINDUP, INVENTORY_SLOTS, LOOT_PICKUP_RADIUS, PLAYER_RADIUS, POTION_COOLDOWN, UNARMED_DAMAGE } from './balance';
 import { pushOutOfWalls } from './collision';
 import type { Point } from './grid';
 import { ENCHANT_ARMOR_BONUS, ENCHANT_WEAPON_BONUS } from './balance';
@@ -140,6 +140,17 @@ export function critChance(player: Player): number {
 /** Ticks between two attacks: gear that quickens the hand shortens it. */
 export function attackCooldown(player: Player): number {
   return Math.max(PLAYER_ATTACK_COOLDOWN_MIN, Math.round(PLAYER_ATTACK_COOLDOWN / (1 + gearStats(player).haste / 100)));
+}
+
+/**
+ * True while the hero is in the middle of a blow: winding it up or recovering from it.
+ * Meanwhile he walks slowly and keeps facing the blow; for the rest of the wait until the
+ * next attack he moves freely.
+ */
+export function isStriking(player: Player): boolean {
+  if (player.pendingAttack !== null) return true;
+  if (player.attackCooldown === 0) return false;
+  return attackCooldown(player) - player.attackCooldown < PLAYER_ATTACK_WINDUP + PLAYER_ATTACK_RECOVERY;
 }
 
 /** Recomputes maximum health and mana from level and gear; call after either changes. */

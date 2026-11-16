@@ -96,6 +96,13 @@ describe('difficulty of the hunt', () => {
     }
   });
 
+  it('takes the time of a classic MMORPG fight: seconds of trading blows, not a flurry or a slog', () => {
+    for (const r of results) {
+      expect(r.duel.seconds, r.name).toBeGreaterThanOrEqual(4);
+      expect(r.duel.seconds, r.name).toBeLessThanOrEqual(18);
+    }
+  });
+
   it('makes the hero pay in health for every same-level fight, yet win it alone', () => {
     for (const r of results) {
       expect(r.duel.won, r.name).toBe(true);

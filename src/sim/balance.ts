@@ -60,8 +60,10 @@ export const MIN_DAMAGE_TAKEN = 1;
 export const PLAYER_ATTACK_RANGE = 1.35;
 /** Full width of the swing, in radians. */
 export const PLAYER_ATTACK_ARC = (110 * Math.PI) / 180;
-/** Delay between pressing attack and the blow landing. */
-export const PLAYER_ATTACK_WINDUP = ticks(0.1);
+/** Delay between pressing attack and the blow landing: a visible wind-up, as in classic MMORPGs. */
+export const PLAYER_ATTACK_WINDUP = ticks(0.35);
+/** After the blow lands the hero takes this long to recover from it. */
+export const PLAYER_ATTACK_RECOVERY = ticks(0.25);
 /** While a blow is being struck and recovered from, the hero walks at this share of full speed: fight or run, not both. */
 export const PLAYER_ATTACK_SLOW = 0.4;
 /** Kills of one kind of monster that raise the hero's mastery of hunting it, tier by tier. */
@@ -75,8 +77,8 @@ export const STREAK_WINDOW = ticks(12);
 /** ...and each kill of a streak after the first adds this share of experience, up to the cap. */
 export const STREAK_XP = 0.03;
 export const STREAK_CAP = 10;
-/** Minimum time between two attacks. */
-export const PLAYER_ATTACK_COOLDOWN = ticks(0.45);
+/** Time from one attack to the next, unhasted: about the pace of a starting fighter in classic MMORPGs. */
+export const PLAYER_ATTACK_COOLDOWN = ticks(1.2);
 /** Health comes back after this long without taking damage... */
 export const PLAYER_REGEN_DELAY = ticks(5);
 /** ...at one point per this many ticks. */
@@ -87,7 +89,7 @@ export const CRIT_BASE = 5;
 export const CRIT_MAX = 60;
 export const CRIT_MULTIPLIER = 2;
 /** However quick the gear, attacks never come faster than this. */
-export const PLAYER_ATTACK_COOLDOWN_MIN = ticks(0.2);
+export const PLAYER_ATTACK_COOLDOWN_MIN = ticks(0.5);
 
 // Monsters
 /** Kind IDs are stable: saves and rules use them, the client maps them to art. */
@@ -135,14 +137,14 @@ export const MONSTER_XP = 12;
 export const MONSTER_HP_PER_LEVEL = 0.3;
 export const MONSTER_DAMAGE_PER_LEVEL = 0.16;
 export const MONSTER_XP_PER_LEVEL = 0.3;
-export const MONSTER_DAMAGE: readonly [number, number] = [9, 14];
+export const MONSTER_DAMAGE: readonly [number, number] = [6, 9];
 /** A monster starts its attack within this distance... */
 export const MONSTER_ATTACK_START = 0.95;
 /** ...and the blow lands if the hero is still within this one. */
 export const MONSTER_ATTACK_REACH = 1.35;
 /** The visible warning before a monster's blow. It keeps after the hero meanwhile, so walking off is not enough. */
 export const MONSTER_ATTACK_WINDUP = ticks(0.35);
-export const MONSTER_ATTACK_COOLDOWN = ticks(0.7);
+export const MONSTER_ATTACK_COOLDOWN = ticks(1.2);
 /** A hit pushes the monster back this far, unless it has already begun its own blow. */
 export const MONSTER_KNOCKBACK = 0.25;
 /** Share of monsters, in percent, that are elders: rare, tough, and generous. */

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {
   type Command, type GameEvent, type GroundLoot, type ItemId, type Monster, type NpcKind, type Point, type Quality, type SkillId, type World, type ZoneKind,
   ITEMS, LOOT_PICKUP_RADIUS, MONSTER_ATTACK_WINDUP, PLAYER_ATTACK_RANGE, PLAYER_ATTACK_WINDUP, SKILLS, TICK_MS,
-  type Player, classSkills, isAlive, isMoving, isUnique, isWalkable, step, weaponInHand,
+  type Player, classSkills, isAlive, isMoving, isStriking, isUnique, isWalkable, step, weaponInHand,
 } from '../../sim';
 import { QUICK_KEYS } from '../hotbar';
 import { QUALITY_COLOR } from '../itemText';
@@ -392,7 +392,7 @@ export class WorldScene {
     const ruleVel = this.heroRuleVel.set(player.pos.x - this.previous.x, 0, player.pos.y - this.previous.y).multiplyScalar((TILE * 1000) / TICK_MS);
     const speed = Math.hypot(ruleVel.x, ruleVel.z);
     let face: THREE.Vector3 | null = null;
-    if (player.pendingAttack || player.attackCooldown > 0) face = this.heroFace.set(player.facing.x, 0, player.facing.y);
+    if (isStriking(player)) face = this.heroFace.set(player.facing.x, 0, player.facing.y);
     else if (speed > 0.3) face = this.heroFace.copy(ruleVel);
     hero.setCombat(this.lockedId !== null || performance.now() - this.lastFight < 4000);
     hero.update(dt, { position: target, speed, face });

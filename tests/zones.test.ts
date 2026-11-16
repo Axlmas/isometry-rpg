@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type Monster, type World, type ZoneKind, EXIT_RANGE, MINES_MIN_LEVEL, PLAYER_SPEED, REGION_SITES, TILE_ROCK, TILE_RUIN, TILE_WATER, MONSTER_KINDS, MONSTER_LEASH,
-  MONSTER_RESPAWN_TIME, PLAYER_MAX_HP, REGIONS, WORLD_HEIGHT, WORLD_WIDTH, characterOf, circleFree,
+  MONSTER_RESPAWN_TIME, PLAYER_ATTACK_WINDUP, PLAYER_MAX_HP, REGIONS, WORLD_HEIGHT, WORLD_WIDTH, characterOf, circleFree,
   createWorld, findPath, isRoad, isWalkable, minesLevelFor, monsterMaxHp, monsterXp, nearestExit,
   newCharacter, regionAt, step, travelerOf,
 } from '../src/sim';
@@ -183,8 +183,10 @@ describe('monsters in the open world', () => {
     monster.home = { x: monster.pos.x + 6, y: monster.pos.y };
     run(world, 10);
     expect(world.player.hp).toBe(PLAYER_MAX_HP);
-    world.player.pos = { x: world.monsters[0]!.pos.x - 1, y: world.monsters[0]!.pos.y };
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
+    run(world, PLAYER_ATTACK_WINDUP - 2);
+    // It walks on during the wind-up; the hero is right behind it as the blow lands.
+    world.player.pos = { x: world.monsters[0]!.pos.x - 1, y: world.monsters[0]!.pos.y };
     run(world, 3);
     expect(world.monsters[0]).toMatchObject({ returning: false, aggro: true });
   });
@@ -193,7 +195,7 @@ describe('monsters in the open world', () => {
     const { world } = meadow(1, 0);
     world.monsters[0]!.hp = 1;
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-    run(world, 3);
+    run(world, PLAYER_ATTACK_WINDUP + 1);
     expect(world.monsters).toEqual([]);
     expect(world.respawns).toHaveLength(1);
     run(world, MONSTER_RESPAWN_TIME + 20);

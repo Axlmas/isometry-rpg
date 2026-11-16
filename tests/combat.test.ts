@@ -69,7 +69,11 @@ describe('hero attack', () => {
   it('hits only the nearest monster inside the swing', () => {
     const world = arena([[1.1, 0.3], [0.9, -0.2]]);
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-    land(world);
+    run(world, PLAYER_ATTACK_WINDUP - 2);
+    // Where they stand as the blow lands: during the wind-up they come closer.
+    world.monsters[0]!.pos = { x: world.spawn.x + 1.1, y: world.spawn.y + 0.3 };
+    world.monsters[1]!.pos = { x: world.spawn.x + 0.9, y: world.spawn.y - 0.2 };
+    run(world, 2);
     expect(world.monsters[0]!.hp).toBe(MONSTER_MAX_HP);
     expect(world.monsters[1]!.hp).toBeLessThan(MONSTER_MAX_HP);
   });
@@ -184,13 +188,33 @@ describe('monsters', () => {
     }
   });
 
-  it('have their attack interrupted by a hit', () => {
-    const world = arena([[0.9, 0]]);
-    step(world);
-    expect(world.monsters[0]?.windup).toBeGreaterThan(0);
-    step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-    land(world);
-    expect(world.player.hp).toBe(PLAYER_MAX_HP);
+  it('are staggered out of their attack by a critical blow, but not by an ordinary one', () => {
+    // The hero's blow is under way when the monster, stepping in, starts its own.
+    const seen = { crit: 0, plain: 0 };
+    for (let seed = 1; seed <= 40; seed++) {
+      const world = arena([[1.3, 0]], seed);
+      world.monsters[0]!.elder = false; // an elder is never staggered
+      step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
+      let hit: { crit: boolean } | undefined;
+      let left = 0;
+      for (let i = 1; i <= PLAYER_ATTACK_WINDUP && !hit; i++) {
+        left = world.monsters[0]!.windup;
+        step(world);
+        hit = world.events.find((e): e is Extract<typeof e, { type: 'monsterHit' }> => e.type === 'monsterHit');
+      }
+      if (!hit || left === 0) continue;
+      // Wait until its blow was due: it lands only if the hero's blow was an ordinary one.
+      run(world, left);
+      if (hit.crit) {
+        seen.crit += 1;
+        expect(world.player.hp).toBe(PLAYER_MAX_HP);
+      } else {
+        seen.plain += 1;
+        expect(world.player.hp).toBeLessThan(PLAYER_MAX_HP);
+      }
+    }
+    expect(seen.crit).toBeGreaterThan(0);
+    expect(seen.plain).toBeGreaterThan(0);
   });
 
   it('find their way around walls and never stand in a wall or in each other', () => {

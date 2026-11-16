@@ -14,7 +14,7 @@ function arena(cls: ClassId, offsets: Array<[number, number]> = [], level = 10, 
   }
   const template = createWorld(5).monsters[0] as Monster;
   world.monsters = offsets.map(([dx, dy], id) => ({
-    ...template, id, hp: 10000, maxHp: 10000,
+    ...template, id, hp: 10000, maxHp: 10000, stroll: null, rest: 100000,
     home: { x: world.spawn.x + dx, y: world.spawn.y + dy },
     pos: { x: world.spawn.x + dx, y: world.spawn.y + dy },
   }));

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSave, serializeWorld } from '../src/client/save';
 import {
   type ItemMods, type Monster, type World,
-  AFFIX_RANGE, CRIT_BASE, CRIT_MULTIPLIER, DROP_TABLES, ELDER, ITEMS, MASTERY_TIERS, MONSTER_KINDS, MONSTER_KIND_IDS, MONSTER_SPACING, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_SLOW, STREAK_CAP, STREAK_WINDOW, STREAK_XP, QUALITIES, QUALITY,
+  AFFIX_RANGE, CRIT_BASE, CRIT_MULTIPLIER, DROP_TABLES, ELDER, ITEMS, MASTERY_TIERS, MONSTER_KINDS, MONSTER_KIND_IDS, MONSTER_SPACING, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_RECOVERY, PLAYER_ATTACK_SLOW, PLAYER_ATTACK_WINDUP, STREAK_CAP, STREAK_WINDOW, STREAK_XP, QUALITIES, QUALITY,
   addItem, affixCount, attackCooldown, createRng, createWorld, critChance, droppableEquipment, gearStats, isUnique, masteryTier, monsterMaxHp, monsterXp, newHero,
   playerDamage, playerDefense, refreshVitals, rollMods, streakBonus, sellPrice, step, validMods, worthOf,
 } from '../src/sim';
@@ -155,9 +155,9 @@ describe('critical blows', () => {
       const { map } = world;
       for (let y = 1; y < map.height - 1; y++) for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;
       const template = world.monsters[0] as Monster;
-      world.monsters = [{ ...template, elder: false, hp: 100000, maxHp: 100000, pos: { x: world.spawn.x + 1, y: world.spawn.y }, home: { ...world.spawn } }];
+      world.monsters = [{ ...template, elder: false, stroll: null, rest: 100000, hp: 100000, maxHp: 100000, pos: { x: world.spawn.x + 1, y: world.spawn.y }, home: { ...world.spawn } }];
       step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < PLAYER_ATTACK_WINDUP + 2; i++) {
         for (const event of world.events) {
           if (event.type !== 'monsterHit') continue;
           blows += 1;
@@ -206,7 +206,7 @@ describe('who comes when one is attacked', () => {
     for (let i = 0; i < 60; i++) step(world);
     expect(world.monsters.some((monster) => monster.aggro)).toBe(false);
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-    for (let i = 0; i < 4; i++) step(world);
+    for (let i = 0; i < PLAYER_ATTACK_WINDUP + 1; i++) step(world);
     // The struck boar and the one within earshot turn on the hero; the far one grazes on.
     expect(world.monsters.map((monster) => monster.aggro)).toEqual([true, true, false]);
   });
@@ -228,18 +228,26 @@ describe('who comes when one is attacked', () => {
     world.player.skills.push('sweep');
     world.player.mp = 100;
     step(world, [{ type: 'skill', id: 'sweep', dx: 1, dy: 0 }]);
-    for (let i = 0; i < 4; i++) step(world);
+    for (let i = 0; i < PLAYER_ATTACK_WINDUP + 1; i++) step(world);
     expect(world.monsters.every((monster) => monster.hp < monster.maxHp)).toBe(true);
   });
 
   it('slows the hero while striking: fight or run, not both', () => {
-    const walked = (attacking: boolean) => {
+    const strike = PLAYER_ATTACK_WINDUP + PLAYER_ATTACK_RECOVERY;
+    const walked = (attacking: boolean, ticks: number) => {
       const world = field('boar', []);
+      step(world, [{ type: 'moveDir', dx: 1, dy: 0 }, ...(attacking ? [{ type: 'attack', dx: 1, dy: 0 } as const] : [])]);
       const from = world.player.pos.x;
-      for (let i = 0; i < 40; i++) step(world, [{ type: 'moveDir', dx: 1, dy: 0 }, ...(attacking ? [{ type: 'attack', dx: 1, dy: 0 } as const] : [])]);
+      for (let i = 1; i < ticks; i++) step(world);
       return world.player.pos.x - from;
     };
-    expect(walked(true)).toBeLessThan(walked(false) * (PLAYER_ATTACK_SLOW + 0.1));
+    // While the blow is wound up and recovered from...
+    expect(walked(true, strike)).toBeLessThan(walked(false, strike) * (PLAYER_ATTACK_SLOW + 0.1));
+    // ...but not for the whole wait until the next attack: once recovered, he runs freely.
+    const free = PLAYER_ATTACK_COOLDOWN - strike;
+    expect(free).toBeGreaterThan(0);
+    const after = walked(true, PLAYER_ATTACK_COOLDOWN) - walked(true, strike + 1);
+    expect(after).toBeCloseTo(walked(false, PLAYER_ATTACK_COOLDOWN) - walked(false, strike + 1), 6);
   });
 });
 
@@ -253,8 +261,9 @@ describe('hunting mastery and trophies', () => {
     for (let i = 0; i < MASTERY_TIERS[0]!; i++) {
       world.monsters = [{ ...template, id: i, kind: 'wolf', elder: false, hp: 1, pos: { x: world.player.pos.x + 1, y: world.player.pos.y }, home: { ...world.player.pos } }];
       step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-      for (let t = 0; t < 12 && world.monsters.length > 0; t++) step(world);
-      for (let t = 0; t < 12; t++) {
+      for (let t = 0; t < PLAYER_ATTACK_WINDUP + 2 && world.monsters.length > 0; t++) step(world);
+      // Waits for the next attack, picking up what the kill brought.
+      for (let t = 0; t < PLAYER_ATTACK_COOLDOWN; t++) {
         step(world);
         for (const event of world.events) if (event.type === 'masteryUp') tiers.push(event.tier);
       }
@@ -349,7 +358,7 @@ describe('elders', () => {
       const template = world.monsters[0] as Monster;
       world.monsters = [{ ...template, kind: 'boar', elder: true, hp: 1, pos: { x: world.spawn.x + 1, y: world.spawn.y }, home: { ...world.spawn } }];
       step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-      for (let i = 0; i < 5 && world.monsters.length > 0; i++) step(world);
+      for (let i = 0; i < PLAYER_ATTACK_WINDUP + 2 && world.monsters.length > 0; i++) step(world);
       expect(world.monsters).toEqual([]);
       // Whatever fell at the hero's feet is already in the bag.
       const found = world.loot.filter((loot) => loot.itemId !== 'coins').length + world.player.inventory.length;

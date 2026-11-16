@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type Monster, type World, CHARGE_DAMAGE_MULTIPLIER, INVENTORY_SLOTS, ITEMS, NPC_RANGE, PLAYER_ATTACK_WINDUP,
+  type Monster, type World, CHARGE_DAMAGE_MULTIPLIER, INVENTORY_SLOTS, ITEMS, NPC_RANGE, PLAYER_ATTACK_COOLDOWN, PLAYER_ATTACK_WINDUP,
   POTION_COOLDOWN, SHOP_STOCK, addItem, buyPrice, canFit, circleFree, countItem, createWorld, isNearMerchant,
   newCharacter, removeItem, sellPrice, step,
 } from '../src/sim';
@@ -142,7 +142,7 @@ describe('weapon charges', () => {
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
     expect(world.player.inventory).toEqual([]);
     expect(world.player.chargesOn).toBe(true);
-    for (let i = 0; i < 20; i++) step(world);
+    for (let i = 0; i < PLAYER_ATTACK_COOLDOWN; i++) step(world);
     step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
     expect(world.player.chargesOn).toBe(false);
     expect(types(world)).toEqual(expect.arrayContaining(['chargesEmpty', 'playerSwing']));

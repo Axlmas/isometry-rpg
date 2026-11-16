@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Monster, type MonsterKind, DROP_TABLES, ITEMS, MONSTER_KINDS, STARTING_WEAPONS, createWorld, step } from '../src/sim';
+import { type Monster, type MonsterKind, DROP_TABLES, ITEMS, MONSTER_KINDS, PLAYER_ATTACK_WINDUP, STARTING_WEAPONS, createWorld, step } from '../src/sim';
 
 const KINDS = Object.keys(MONSTER_KINDS) as MonsterKind[];
 
@@ -50,9 +50,9 @@ describe('drop tables', () => {
         const { map } = world;
         for (let y = 1; y < map.height - 1; y++) for (let x = 1; x < map.width - 1; x++) map.tiles[y * map.width + x] = 0;
         const template = world.monsters[0] as Monster;
-        world.monsters = [{ ...template, kind, elder: false, hp: 1, pos: { x: world.spawn.x + 1, y: world.spawn.y }, home: { ...world.spawn } }];
+        world.monsters = [{ ...template, kind, elder: false, stroll: null, rest: 100000, hp: 1, pos: { x: world.spawn.x + 1, y: world.spawn.y }, home: { ...world.spawn } }];
         step(world, [{ type: 'attack', dx: 1, dy: 0 }]);
-        for (let i = 0; i < 5 && world.monsters.length > 0; i++) step(world);
+        for (let i = 0; i < PLAYER_ATTACK_WINDUP + 2 && world.monsters.length > 0; i++) step(world);
         expect(world.monsters).toEqual([]);
         const coins = world.loot.filter((l) => l.itemId === 'coins');
         expect(coins).toHaveLength(1);
